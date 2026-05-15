@@ -178,7 +178,7 @@ export const litePageHtml = String.raw`<!doctype html>
       }
       .workspace-head {
         display: grid;
-        grid-template-columns: auto 1fr auto auto;
+        grid-template-columns: auto minmax(0, 1fr) auto auto;
         gap: 8px;
         align-items: center;
         padding: 10px;
@@ -197,11 +197,16 @@ export const litePageHtml = String.raw`<!doctype html>
       }
       .workspace-name {
         display: block;
+        min-width: 0;
         font-weight: 700;
         color: #232323;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
       }
       .workspace-path {
         display: block;
+        min-width: 0;
         margin-top: 2px;
         color: #756f66;
         font-size: 12px;
@@ -212,6 +217,11 @@ export const litePageHtml = String.raw`<!doctype html>
       .workspace-count {
         color: #756f66;
         font-size: 12px;
+        white-space: nowrap;
+      }
+      .workspace-new {
+        min-width: 52px;
+        padding: 0 10px;
         white-space: nowrap;
       }
       .thread-list {
@@ -379,7 +389,7 @@ export const litePageHtml = String.raw`<!doctype html>
         .panel { margin: 12px; }
         .thread-panel { margin: 8px 12px 0; }
         .thread-tools { grid-template-columns: 1fr; }
-        .workspace-head { grid-template-columns: auto 1fr auto; }
+        .workspace-head { grid-template-columns: auto minmax(0, 1fr) auto; }
         .workspace-count { display: none; }
         .chat-head { margin: 8px 12px 0; }
         .chat-log { padding: 12px; }
@@ -703,6 +713,7 @@ export const litePageHtml = String.raw`<!doctype html>
           chevron.textContent = "▶";
 
           var title = document.createElement("div");
+          title.style.minWidth = "0";
           var name = document.createElement("span");
           name.className = "workspace-name";
           name.textContent = workspaceName(group.cwd);
@@ -718,8 +729,8 @@ export const litePageHtml = String.raw`<!doctype html>
 
           var newBtn = document.createElement("button");
           newBtn.type = "button";
-          newBtn.className = "ghost";
-          newBtn.textContent = "在此新建";
+          newBtn.className = "ghost workspace-new";
+          newBtn.textContent = "new";
           newBtn.onclick = function (event) {
             event.preventDefault();
             event.stopPropagation();
