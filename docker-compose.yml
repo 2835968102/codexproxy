@@ -1,7 +1,6 @@
 services:
   codexproxy:
-    build: .
-    image: codexproxy:latest
+    image: ${CODEXPROXY_IMAGE:-ghcr.io/2835968102/codexproxy:latest}
     container_name: codexproxy
     restart: unless-stopped
     ports:

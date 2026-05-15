@@ -140,10 +140,25 @@ RELAY_TOKEN=replace-with-a-long-random-secret
 PAIRING_CODE=replace-with-a-phone-code
 ```
 
-Build and run:
+Pull the published image and run it:
 
 ```bash
-docker compose up -d --build
+docker pull ghcr.io/2835968102/codexproxy:latest
+docker compose up -d
+```
+
+Or run the image directly:
+
+```bash
+docker run -d \
+  --name codexproxy \
+  --restart unless-stopped \
+  -p 8787:8787 \
+  -e PORT=8787 \
+  -e PUBLIC_BASE_URL=http://server-ip:8787 \
+  -e RELAY_TOKEN=replace-with-a-long-random-secret \
+  -e PAIRING_CODE=replace-with-a-phone-code \
+  ghcr.io/2835968102/codexproxy:latest
 ```
 
 Check status:
@@ -151,6 +166,13 @@ Check status:
 ```bash
 docker compose ps
 docker compose logs -f
+```
+
+If you want to build locally instead of pulling from GHCR:
+
+```bash
+docker build -t codexproxy:local .
+CODEXPROXY_IMAGE=codexproxy:local docker compose up -d
 ```
 
 Phone URL:
@@ -164,4 +186,22 @@ If you use Caddy or Nginx for HTTPS, proxy `/` and `/ws` to `127.0.0.1:8787`, th
 ```env
 RELAY_URL=wss://your-domain.example/ws
 RELAY_TOKEN=replace-with-the-same-long-random-secret
+```
+
+## Publishing Docker Images
+
+Images are published to GitHub Container Registry by `.github/workflows/docker-image.yml`.
+
+After pushing to `main`, GitHub Actions builds and publishes:
+
+```text
+ghcr.io/2835968102/codexproxy:latest
+```
+
+Tagging a release such as `v0.1.0` also publishes a matching image tag:
+
+```bash
+git tag v0.1.0
+git push origin v0.1.0
+docker pull ghcr.io/2835968102/codexproxy:v0.1.0
 ```
