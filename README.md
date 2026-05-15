@@ -135,38 +135,53 @@ npm run start:server
 
 Put Nginx, Caddy, or your platform proxy in front of it with WebSocket upgrade support for `/ws`.
 
-## Docker Deployment
+## Docker Compose Deployment
 
 Docker is intended for the Linux relay server only. Keep the bridge on the computer that runs Codex.
 
-Create a server `.env`:
+Create a server directory:
+
+```bash
+mkdir -p ~/codexproxy
+cd ~/codexproxy
+```
+
+Download the compose template:
+
+```bash
+curl -fsSLo compose.yml https://raw.githubusercontent.com/2835968102/codexproxy/main/deploy/compose.yml
+curl -fsSLo .env https://raw.githubusercontent.com/2835968102/codexproxy/main/deploy/env.example
+```
+
+Edit `.env`:
 
 ```env
 PORT=8787
-PUBLIC_BASE_URL=https://your-domain.example
+PUBLIC_BASE_URL=http://server-ip:8787
 RELAY_TOKEN=replace-with-a-long-random-secret
 PAIRING_CODE=replace-with-a-phone-code
 ```
 
-Pull the published image and run it:
+Start the relay:
 
 ```bash
-docker pull ghcr.io/2835968102/codexproxy:latest
+docker compose pull
 docker compose up -d
 ```
 
-Or run the image directly:
+If you already created the old `docker run` container, remove it once before switching to compose:
 
 ```bash
-docker run -d \
-  --name codexproxy \
-  --restart unless-stopped \
-  -p 8787:8787 \
-  -e PORT=8787 \
-  -e PUBLIC_BASE_URL=http://server-ip:8787 \
-  -e RELAY_TOKEN=replace-with-a-long-random-secret \
-  -e PAIRING_CODE=replace-with-a-phone-code \
-  ghcr.io/2835968102/codexproxy:latest
+docker rm -f codexproxy
+docker compose up -d
+```
+
+Update later:
+
+```bash
+cd ~/codexproxy
+docker compose pull
+docker compose up -d
 ```
 
 Check status:
@@ -174,6 +189,13 @@ Check status:
 ```bash
 docker compose ps
 docker compose logs -f
+```
+
+Stop or restart:
+
+```bash
+docker compose stop
+docker compose restart
 ```
 
 If you want to build locally instead of pulling from GHCR:
