@@ -1,4 +1,3 @@
-import "dotenv/config";
 import WebSocket from "ws";
 import { loadBridgeConfig } from "./config.js";
 import { CodexAppServerClient } from "./codex-client.js";

@@ -1,5 +1,6 @@
 import { existsSync } from "node:fs";
 import path from "node:path";
+import { getBoolean, getNumber, getString, loadConfigSources } from "../shared/config-sources.js";
 
 export type BridgeConfig = {
   relayUrl: string;
@@ -13,28 +14,43 @@ export type BridgeConfig = {
   allowRawRpc: boolean;
 };
 
-export function loadBridgeConfig(env = process.env): BridgeConfig {
-  const relayUrl = env.RELAY_URL ?? "ws://localhost:8787/ws";
-  const relayToken = env.RELAY_TOKEN;
+export function loadBridgeConfig(env = process.env, cwd = process.cwd()): BridgeConfig {
+  const sources = loadConfigSources(env, cwd);
+  const relayUrl = getString(sources, "bridge", "RELAY_URL", "relayUrl", "ws://localhost:8787/ws");
+  const relayToken = getString(sources, "bridge", "RELAY_TOKEN", "relayToken");
   if (!relayToken || relayToken.length < 16) {
     throw new Error("RELAY_TOKEN must match the server token and be at least 16 characters.");
   }
 
-  const codexAppServerPort = Number(env.CODEX_APP_SERVER_PORT ?? "53179");
+  const codexAppServerPort = getNumber(
+    sources,
+    "bridge",
+    "CODEX_APP_SERVER_PORT",
+    "codexAppServerPort",
+    53179
+  );
   if (!Number.isInteger(codexAppServerPort) || codexAppServerPort < 1 || codexAppServerPort > 65535) {
     throw new Error("CODEX_APP_SERVER_PORT must be a valid TCP port.");
   }
 
   return {
-    relayUrl,
+    relayUrl: relayUrl ?? "ws://localhost:8787/ws",
     relayToken,
-    sessionId: env.CODEX_PROXY_SESSION_ID,
-    deviceName: env.CODEX_PROXY_DEVICE_NAME ?? "Codex Desktop",
-    codexBin: env.CODEX_BIN?.trim() || findDefaultCodexBin(env),
-    codexAppServerUrl: env.CODEX_APP_SERVER_URL ?? `ws://127.0.0.1:${codexAppServerPort}`,
-    autoStartAppServer: env.CODEX_AUTO_START_APP_SERVER !== "false",
+    sessionId: getString(sources, "bridge", "CODEX_PROXY_SESSION_ID", "sessionId"),
+    deviceName: getString(sources, "bridge", "CODEX_PROXY_DEVICE_NAME", "deviceName", "Codex Desktop") ?? "Codex Desktop",
+    codexBin: getString(sources, "bridge", "CODEX_BIN", "codexBin")?.trim() || findDefaultCodexBin(env),
+    codexAppServerUrl:
+      getString(sources, "bridge", "CODEX_APP_SERVER_URL", "codexAppServerUrl") ??
+      `ws://127.0.0.1:${codexAppServerPort}`,
+    autoStartAppServer: getBoolean(
+      sources,
+      "bridge",
+      "CODEX_AUTO_START_APP_SERVER",
+      "autoStartAppServer",
+      true
+    ),
     codexAppServerPort,
-    allowRawRpc: env.ALLOW_RAW_RPC === "true"
+    allowRawRpc: getBoolean(sources, "bridge", "ALLOW_RAW_RPC", "allowRawRpc", false)
   };
 }
 

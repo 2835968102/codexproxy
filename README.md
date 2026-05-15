@@ -26,41 +26,47 @@ Install dependencies:
 npm install
 ```
 
-Create local environment values:
+Create local config values:
 
 ```powershell
-Copy-Item .env.example .env
+Copy-Item codexproxy.local.example.json codexproxy.local.json
 ```
 
-Set strong values in `.env`:
+Set strong values in `codexproxy.local.json`:
 
-```text
-RELAY_TOKEN=use-a-long-random-secret
-PAIRING_CODE=use-a-phone-pairing-code
+```json
+{
+  "server": {
+    "relayToken": "use-a-long-random-secret",
+    "pairingCode": "use-a-phone-pairing-code"
+  },
+  "bridge": {
+    "relayUrl": "ws://localhost:8787/ws",
+    "relayToken": "use-a-long-random-secret"
+  }
+}
 ```
 
 Start the relay server:
 
 ```powershell
-$env:RELAY_TOKEN="use-a-long-random-secret"
-$env:PAIRING_CODE="use-a-phone-pairing-code"
 npm run dev:server
 ```
 
 Start the local bridge in another terminal:
 
 ```powershell
-$env:RELAY_URL="ws://localhost:8787/ws"
-$env:RELAY_TOKEN="use-a-long-random-secret"
-$env:CODEX_PROXY_DEVICE_NAME="Desktop Codex"
 npm run dev:bridge
 ```
 
-On Windows, if the bridge cannot find Codex, set `CODEX_BIN` to the real executable path:
+On Windows, if the bridge cannot find Codex, set `bridge.codexBin` in `codexproxy.local.json` to the real executable path:
 
-```powershell
-$env:CODEX_BIN="C:\Users\<you>\AppData\Local\OpenAI\Codex\bin\codex.exe"
-npm run start:bridge
+```json
+{
+  "bridge": {
+    "codexBin": "C:\\Users\\<you>\\AppData\\Local\\OpenAI\\Codex\\bin\\codex.exe"
+  }
+}
 ```
 
 Open the phone console:
@@ -75,7 +81,9 @@ If your phone browser shows a blank page, use the lightweight fallback page:
 http://localhost:8787/lite
 ```
 
-On a real VPS, expose the server over HTTPS and use `wss://your-domain/ws` for `RELAY_URL`.
+On a real VPS, expose the server over HTTPS and use `wss://your-domain/ws` for `bridge.relayUrl`.
+
+Config priority is: real environment variables, then `codexproxy.local.json`, then `.env`, then defaults. `codexproxy.local.json` is ignored by git because it can contain private tokens.
 
 ## Capabilities
 
@@ -181,11 +189,15 @@ Phone URL:
 http://server-ip:8787/lite
 ```
 
-If you use Caddy or Nginx for HTTPS, proxy `/` and `/ws` to `127.0.0.1:8787`, then set the Windows bridge:
+If you use Caddy or Nginx for HTTPS, proxy `/` and `/ws` to `127.0.0.1:8787`, then set the Windows bridge in `codexproxy.local.json`:
 
-```env
-RELAY_URL=wss://your-domain.example/ws
-RELAY_TOKEN=replace-with-the-same-long-random-secret
+```json
+{
+  "bridge": {
+    "relayUrl": "wss://your-domain.example/ws",
+    "relayToken": "replace-with-the-same-long-random-secret"
+  }
+}
 ```
 
 ## Publishing Docker Images

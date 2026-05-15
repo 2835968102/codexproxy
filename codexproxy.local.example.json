@@ -1,0 +1,17 @@
+{
+  "server": {
+    "port": 8787,
+    "publicBaseUrl": "http://localhost:8787",
+    "relayToken": "change-this-long-random-token",
+    "pairingCode": "123456"
+  },
+  "bridge": {
+    "relayUrl": "ws://localhost:8787/ws",
+    "relayToken": "change-this-long-random-token",
+    "deviceName": "Desktop Codex",
+    "codexBin": "",
+    "autoStartAppServer": true,
+    "codexAppServerPort": 53179,
+    "allowRawRpc": false
+  }
+}

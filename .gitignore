@@ -3,5 +3,6 @@ dist/
 .env
 .env.*
 !.env.example
+codexproxy.local.json
 *.log
 coverage/
