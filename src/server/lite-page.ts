@@ -169,13 +169,31 @@ export const litePageHtml = String.raw`<!doctype html>
         overflow: hidden;
         background: #fbfaf7;
       }
+      .workspace-group > summary {
+        list-style: none;
+        cursor: pointer;
+      }
+      .workspace-group > summary::-webkit-details-marker {
+        display: none;
+      }
       .workspace-head {
         display: grid;
-        grid-template-columns: 1fr auto;
+        grid-template-columns: auto 1fr auto auto;
         gap: 8px;
         align-items: center;
         padding: 10px;
         border-bottom: 1px solid #e8e5dc;
+      }
+      .workspace-group:not([open]) .workspace-head {
+        border-bottom: 0;
+      }
+      .workspace-chevron {
+        color: #756f66;
+        font-size: 12px;
+        transition: transform 0.16s ease;
+      }
+      .workspace-group[open] .workspace-chevron {
+        transform: rotate(90deg);
       }
       .workspace-name {
         display: block;
@@ -189,6 +207,11 @@ export const litePageHtml = String.raw`<!doctype html>
         font-size: 12px;
         overflow: hidden;
         text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+      .workspace-count {
+        color: #756f66;
+        font-size: 12px;
         white-space: nowrap;
       }
       .thread-list {
@@ -318,6 +341,17 @@ export const litePageHtml = String.raw`<!doctype html>
       .composer button {
         min-width: 74px;
       }
+      .bottom-btn {
+        position: fixed;
+        right: max(16px, calc((100vw - 880px) / 2 + 16px));
+        bottom: calc(74px + env(safe-area-inset-bottom));
+        z-index: 5;
+        min-height: 38px;
+        border-color: #2f7d54;
+        background: #2f7d54;
+        color: #fff;
+        box-shadow: 0 8px 24px rgba(0, 0, 0, 0.18);
+      }
       .debug {
         margin: 0 14px 14px;
         border: 1px solid #dedbd2;
@@ -345,10 +379,15 @@ export const litePageHtml = String.raw`<!doctype html>
         .panel { margin: 12px; }
         .thread-panel { margin: 8px 12px 0; }
         .thread-tools { grid-template-columns: 1fr; }
-        .workspace-head { grid-template-columns: 1fr; }
+        .workspace-head { grid-template-columns: auto 1fr auto; }
+        .workspace-count { display: none; }
         .chat-head { margin: 8px 12px 0; }
         .chat-log { padding: 12px; }
         .bubble { max-width: 92%; }
+        .bottom-btn {
+          right: 14px;
+          bottom: calc(78px + env(safe-area-inset-bottom));
+        }
       }
     </style>
   </head>
@@ -400,6 +439,7 @@ export const litePageHtml = String.raw`<!doctype html>
         <div id="chatLog" class="chat-log">
           <div class="empty-state">连接后选择一个对话，或输入消息新建对话。</div>
         </div>
+        <button id="bottomBtn" type="button" class="bottom-btn hidden">到底部 ↓</button>
 
         <form id="composer" class="composer">
           <textarea id="prompt" rows="1" placeholder="发给 Codex 的消息"></textarea>
@@ -425,6 +465,7 @@ export const litePageHtml = String.raw`<!doctype html>
         var currentThreadCwd = "";
         var bubbleByItemId = {};
         var lastAssistantBubble = null;
+        var workspaceOpenByKey = readWorkspaceOpenState();
 
         var pairingInput = document.getElementById("pairingCode");
         var sessionInput = document.getElementById("sessionId");
@@ -442,6 +483,7 @@ export const litePageHtml = String.raw`<!doctype html>
         var chatTitle = document.getElementById("chatTitle");
         var chatSubtitle = document.getElementById("chatSubtitle");
         var sendBtn = document.getElementById("sendBtn");
+        var bottomBtn = document.getElementById("bottomBtn");
 
         pairingInput.value = localStorage.getItem("pairingCode") || "";
         sessionInput.value = localStorage.getItem("sessionId") || "";
@@ -642,11 +684,23 @@ export const litePageHtml = String.raw`<!doctype html>
         }
 
         function renderWorkspaceGroup(group) {
-          var wrap = document.createElement("section");
+          var wrap = document.createElement("details");
           wrap.className = "workspace-group";
+          var groupKey = workspaceKey(group.cwd);
+          var hasSelectedThread = group.threads.some(function (thread) { return thread.id === currentThreadId; });
+          wrap.open = hasSelectedThread || workspaceOpenByKey[groupKey] !== false;
+          wrap.addEventListener("toggle", function () {
+            workspaceOpenByKey[groupKey] = wrap.open;
+            saveWorkspaceOpenState();
+          });
 
+          var summary = document.createElement("summary");
           var head = document.createElement("div");
           head.className = "workspace-head";
+
+          var chevron = document.createElement("span");
+          chevron.className = "workspace-chevron";
+          chevron.textContent = "▶";
 
           var title = document.createElement("div");
           var name = document.createElement("span");
@@ -658,18 +712,27 @@ export const litePageHtml = String.raw`<!doctype html>
           title.appendChild(name);
           title.appendChild(path);
 
+          var count = document.createElement("span");
+          count.className = "workspace-count";
+          count.textContent = group.threads.length + " 个对话";
+
           var newBtn = document.createElement("button");
           newBtn.type = "button";
           newBtn.className = "ghost";
           newBtn.textContent = "在此新建";
-          newBtn.onclick = function () {
+          newBtn.onclick = function (event) {
+            event.preventDefault();
+            event.stopPropagation();
             cwdEl.value = group.cwd || "";
             startNewThread(true);
           };
 
+          head.appendChild(chevron);
           head.appendChild(title);
+          head.appendChild(count);
           head.appendChild(newBtn);
-          wrap.appendChild(head);
+          summary.appendChild(head);
+          wrap.appendChild(summary);
 
           var list = document.createElement("div");
           list.className = "thread-list";
@@ -940,6 +1003,7 @@ export const litePageHtml = String.raw`<!doctype html>
             if (role === "assistant") lastAssistantBubble = body;
           }
           scrollChat();
+          updateBottomButton();
           return body;
         }
 
@@ -976,6 +1040,7 @@ export const litePageHtml = String.raw`<!doctype html>
           empty.className = "empty-state";
           empty.textContent = text;
           chatLog.appendChild(empty);
+          updateBottomButton();
         }
 
         function clearEmptyState() {
@@ -984,7 +1049,23 @@ export const litePageHtml = String.raw`<!doctype html>
         }
 
         function scrollChat() {
-          chatLog.scrollTop = chatLog.scrollHeight;
+          chatLog.scrollTo({
+            top: chatLog.scrollHeight,
+            behavior: "auto"
+          });
+          requestAnimationFrame(function () {
+            chatLog.scrollTop = chatLog.scrollHeight;
+            updateBottomButton();
+          });
+          setTimeout(function () {
+            chatLog.scrollTop = chatLog.scrollHeight;
+            updateBottomButton();
+          }, 50);
+        }
+
+        function updateBottomButton() {
+          var distance = chatLog.scrollHeight - chatLog.scrollTop - chatLog.clientHeight;
+          bottomBtn.className = distance > 160 ? "bottom-btn" : "bottom-btn hidden";
         }
 
         function autoSizePrompt() {
@@ -1051,6 +1132,22 @@ export const litePageHtml = String.raw`<!doctype html>
           return parts[parts.length - 1] || clean;
         }
 
+        function workspaceKey(cwd) {
+          return cwd || "__none__";
+        }
+
+        function readWorkspaceOpenState() {
+          try {
+            return JSON.parse(localStorage.getItem("workspaceOpenByKey") || "{}") || {};
+          } catch (_) {
+            return {};
+          }
+        }
+
+        function saveWorkspaceOpenState() {
+          localStorage.setItem("workspaceOpenByKey", JSON.stringify(workspaceOpenByKey));
+        }
+
         function threadTitle(thread) {
           return (thread && (thread.name || thread.preview || thread.id)) || "未命名对话";
         }
@@ -1110,6 +1207,8 @@ export const litePageHtml = String.raw`<!doctype html>
         document.getElementById("refreshBtn").onclick = function () { refreshThreads(currentThreadId); };
         document.getElementById("newThreadBtn").onclick = function () { startNewThread(true); };
         document.getElementById("composer").onsubmit = sendPrompt;
+        bottomBtn.onclick = scrollChat;
+        chatLog.addEventListener("scroll", updateBottomButton);
         cwdEl.addEventListener("input", function () {
           if (!currentThreadId) updateChatHeader(null);
         });
