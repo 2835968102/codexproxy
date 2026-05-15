@@ -8,6 +8,7 @@
   "bridge": {
     "relayUrl": "ws://localhost:8787/ws",
     "relayToken": "change-this-long-random-token",
+    "sessionId": "desktop-codex",
     "deviceName": "Desktop Codex",
     "codexBin": "",
     "autoStartAppServer": true,

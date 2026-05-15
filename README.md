@@ -126,6 +126,7 @@ For a Linux relay at `http://150.158.38.34:8787`, edit `codexproxy.local.json`. 
   "bridge": {
     "relayUrl": "ws://150.158.38.34:8787/ws",
     "relayToken": "same-value-as-linux-RELAY_TOKEN",
+    "sessionId": "desktop-codex",
     "deviceName": "Desktop Codex",
     "codexBin": "C:\\Users\\<you>\\AppData\\Local\\OpenAI\\Codex\\bin\\codex.exe",
     "autoStartAppServer": true,
@@ -138,6 +139,8 @@ For a Linux relay at `http://150.158.38.34:8787`, edit `codexproxy.local.json`. 
 Replace `<you>` with your Windows user name, or leave `codexBin` empty if the `codex` command is already available in PowerShell.
 
 `bridge.relayToken` must be the same value as `RELAY_TOKEN` in the Linux relay `.env`.
+
+`bridge.sessionId` is optional but recommended. It gives this bridge a stable ID, so the phone can reconnect to the same bridge after refresh or relay restart. Use a different `sessionId` for every bridge, for example `desktop-codex` and `linux-codex`.
 
 Start the bridge:
 
@@ -208,6 +211,7 @@ Edit `.env`. This file is not JSON:
 ```env
 RELAY_URL=ws://your-relay-server:8787/ws
 RELAY_TOKEN=same-value-as-linux-relay-RELAY_TOKEN
+CODEX_PROXY_SESSION_ID=linux-codex
 CODEX_PROXY_DEVICE_NAME=Linux Codex Bridge
 CODEX_APP_SERVER_URL=ws://127.0.0.1:53179
 CODEX_AUTO_START_APP_SERVER=false
@@ -259,6 +263,28 @@ The phone can:
 - Start a new thread with an optional working directory.
 - Continue an existing thread without leaving its original working directory.
 - Receive streamed Codex replies.
+
+## Session ID
+
+`sessionId` identifies one bridge session on the relay. It is not a password and does not replace `RELAY_TOKEN`.
+
+If a bridge does not set a session ID, the relay generates a random one when that bridge connects. That works, but the phone may need to select the new random session again after the bridge reconnects.
+
+Use a stable session ID when you want a fixed phone target:
+
+```json
+{
+  "bridge": {
+    "sessionId": "desktop-codex"
+  }
+}
+```
+
+For Linux bridge container `.env`:
+
+```env
+CODEX_PROXY_SESSION_ID=linux-codex
+```
 
 ## Token Rules
 
