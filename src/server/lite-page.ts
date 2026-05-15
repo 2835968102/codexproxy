@@ -10,23 +10,31 @@ export const litePageHtml = String.raw`<!doctype html>
       body {
         margin: 0;
         font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-        background: #f6f5f1;
+        background: #f5f4ef;
         color: #202020;
       }
-      button, input, textarea, select { font: inherit; }
+      button, input, textarea { font: inherit; }
       button {
         border: 1px solid #202020;
         background: #202020;
         color: #fff;
         border-radius: 8px;
-        min-height: 42px;
-        padding: 0 14px;
+        min-height: 40px;
+        padding: 0 13px;
       }
       button.secondary {
         background: #fff;
         color: #202020;
       }
-      input, textarea, select {
+      button.ghost {
+        border-color: #d9d6cd;
+        background: #fff;
+        color: #36332e;
+      }
+      button:disabled {
+        opacity: 0.55;
+      }
+      input, textarea {
         width: 100%;
         border: 1px solid #d2d0c8;
         border-radius: 8px;
@@ -37,7 +45,7 @@ export const litePageHtml = String.raw`<!doctype html>
       textarea {
         resize: none;
         min-height: 44px;
-        max-height: 140px;
+        max-height: 150px;
       }
       label {
         display: grid;
@@ -46,7 +54,7 @@ export const litePageHtml = String.raw`<!doctype html>
         font-size: 13px;
       }
       .shell {
-        width: min(780px, 100%);
+        width: min(880px, 100%);
         min-height: 100vh;
         margin: 0 auto;
         display: flex;
@@ -61,16 +69,25 @@ export const litePageHtml = String.raw`<!doctype html>
         align-items: center;
         gap: 12px;
         padding: 12px 14px;
-        background: rgba(246, 245, 241, 0.96);
+        background: rgba(245, 244, 239, 0.96);
         border-bottom: 1px solid #dedbd2;
       }
+      h1, h2, h3, p { margin-top: 0; }
       h1 {
-        margin: 0;
+        margin-bottom: 2px;
         font-size: 20px;
         line-height: 1.2;
       }
+      h2 {
+        margin-bottom: 0;
+        font-size: 17px;
+      }
+      h3 {
+        margin-bottom: 0;
+        font-size: 15px;
+      }
       .subtitle {
-        margin: 3px 0 0;
+        margin-bottom: 0;
         color: #6a645b;
         font-size: 12px;
         overflow: hidden;
@@ -102,10 +119,6 @@ export const litePageHtml = String.raw`<!doctype html>
         display: grid;
         gap: 12px;
       }
-      .login h2 {
-        margin: 0;
-        font-size: 22px;
-      }
       .notice {
         margin: 0;
         padding: 10px 12px;
@@ -123,31 +136,115 @@ export const litePageHtml = String.raw`<!doctype html>
         display: flex;
         flex-direction: column;
       }
-      .settings {
+      .thread-panel {
         margin: 10px 14px 0;
         border: 1px solid #dedbd2;
         border-radius: 10px;
         background: #fff;
       }
-      .settings summary {
+      .thread-panel summary {
         cursor: pointer;
         padding: 11px 12px;
         color: #36332e;
         font-weight: 650;
       }
-      .settings-body {
+      .thread-body {
         display: grid;
-        gap: 10px;
+        gap: 12px;
         padding: 0 12px 12px;
       }
-      .settings-row {
+      .thread-tools {
         display: grid;
-        grid-template-columns: 1fr auto;
+        grid-template-columns: 1fr auto auto;
         gap: 8px;
         align-items: end;
       }
-      .settings-row button {
-        min-width: 86px;
+      .workspace-list {
+        display: grid;
+        gap: 10px;
+      }
+      .workspace-group {
+        border: 1px solid #e4e1d8;
+        border-radius: 9px;
+        overflow: hidden;
+        background: #fbfaf7;
+      }
+      .workspace-head {
+        display: grid;
+        grid-template-columns: 1fr auto;
+        gap: 8px;
+        align-items: center;
+        padding: 10px;
+        border-bottom: 1px solid #e8e5dc;
+      }
+      .workspace-name {
+        display: block;
+        font-weight: 700;
+        color: #232323;
+      }
+      .workspace-path {
+        display: block;
+        margin-top: 2px;
+        color: #756f66;
+        font-size: 12px;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+      .thread-list {
+        display: grid;
+      }
+      .thread-item {
+        width: 100%;
+        display: grid;
+        gap: 3px;
+        text-align: left;
+        border: 0;
+        border-radius: 0;
+        border-bottom: 1px solid #ebe8df;
+        background: #fff;
+        color: #202020;
+        min-height: 0;
+        padding: 10px;
+      }
+      .thread-item:last-child {
+        border-bottom: 0;
+      }
+      .thread-item.selected {
+        background: #eaf4ef;
+        box-shadow: inset 3px 0 0 #2f7d54;
+      }
+      .thread-title {
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        font-weight: 650;
+      }
+      .thread-meta {
+        color: #7b756d;
+        font-size: 12px;
+      }
+      .chat-head {
+        display: grid;
+        gap: 4px;
+        margin: 10px 14px 0;
+        padding: 10px 12px;
+        border: 1px solid #dedbd2;
+        border-radius: 10px;
+        background: #fff;
+      }
+      .chat-title {
+        font-weight: 750;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+      .chat-subtitle {
+        color: #746f67;
+        font-size: 12px;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
       }
       .chat-log {
         flex: 1;
@@ -160,7 +257,7 @@ export const litePageHtml = String.raw`<!doctype html>
       }
       .empty-state {
         margin: auto;
-        max-width: 320px;
+        max-width: 340px;
         color: #746f67;
         text-align: center;
         line-height: 1.5;
@@ -196,7 +293,7 @@ export const litePageHtml = String.raw`<!doctype html>
         border-bottom-left-radius: 4px;
       }
       .bubble.system {
-        color: #6a645b;
+        color: #5f5a52;
         background: #ece8df;
         font-size: 13px;
         max-width: 100%;
@@ -215,7 +312,7 @@ export const litePageHtml = String.raw`<!doctype html>
         gap: 8px;
         align-items: end;
         padding: 10px 14px max(10px, env(safe-area-inset-bottom));
-        background: rgba(246, 245, 241, 0.98);
+        background: rgba(245, 244, 239, 0.98);
         border-top: 1px solid #dedbd2;
       }
       .composer button {
@@ -243,13 +340,15 @@ export const litePageHtml = String.raw`<!doctype html>
         padding: 10px;
         font-size: 12px;
       }
-      @media (max-width: 560px) {
+      @media (max-width: 640px) {
         .shell { width: 100%; }
         .panel { margin: 12px; }
-        .settings { margin: 8px 12px 0; }
+        .thread-panel { margin: 8px 12px 0; }
+        .thread-tools { grid-template-columns: 1fr; }
+        .workspace-head { grid-template-columns: 1fr; }
+        .chat-head { margin: 8px 12px 0; }
         .chat-log { padding: 12px; }
-        .bubble { max-width: 90%; }
-        .settings-row { grid-template-columns: 1fr; }
+        .bubble { max-width: 92%; }
       }
     </style>
   </head>
@@ -276,26 +375,30 @@ export const litePageHtml = String.raw`<!doctype html>
       </section>
 
       <section id="chatApp" class="chat-app hidden">
-        <details class="settings">
-          <summary>会话设置</summary>
-          <div class="settings-body">
-            <div class="settings-row">
-              <label>线程
-                <select id="threadSelect">
-                  <option value="">新线程</option>
-                </select>
+        <details class="thread-panel" open>
+          <summary>工作目录与对话</summary>
+          <div class="thread-body">
+            <div class="thread-tools">
+              <label>新对话工作目录
+                <input id="cwd" placeholder="可选，例如 D:\PROJECT\CODE\your-repo" />
               </label>
+              <button id="newThreadBtn" type="button" class="secondary">新对话</button>
               <button id="refreshBtn" type="button" class="secondary">刷新</button>
             </div>
-            <label>新线程工作目录
-              <input id="cwd" placeholder="可选，例如 D:\PROJECT\CODE\your-repo" />
-            </label>
             <p id="actionMsg" class="notice hidden"></p>
+            <div id="workspaceList" class="workspace-list">
+              <div class="empty-state">连接后会按工作目录分组显示历史对话。</div>
+            </div>
           </div>
         </details>
 
+        <div class="chat-head">
+          <div id="chatTitle" class="chat-title">未选择对话</div>
+          <div id="chatSubtitle" class="chat-subtitle">选择历史对话会自动加载聊天记录。</div>
+        </div>
+
         <div id="chatLog" class="chat-log">
-          <div class="empty-state">连接后可以直接像聊天一样给 Codex 发消息。选择历史线程时会尽量保留原项目目录。</div>
+          <div class="empty-state">连接后选择一个对话，或输入消息新建对话。</div>
         </div>
 
         <form id="composer" class="composer">
@@ -316,9 +419,13 @@ export const litePageHtml = String.raw`<!doctype html>
         var seq = 1;
         var pending = {};
         var retriedStaleSession = false;
-        var threadCwdById = {};
+        var threads = [];
+        var threadsById = {};
+        var currentThreadId = "";
+        var currentThreadCwd = "";
         var bubbleByItemId = {};
         var lastAssistantBubble = null;
+
         var pairingInput = document.getElementById("pairingCode");
         var sessionInput = document.getElementById("sessionId");
         var statusEl = document.getElementById("status");
@@ -329,12 +436,16 @@ export const litePageHtml = String.raw`<!doctype html>
         var actionMsg = document.getElementById("actionMsg");
         var logEl = document.getElementById("log");
         var chatLog = document.getElementById("chatLog");
-        var threadSelect = document.getElementById("threadSelect");
+        var workspaceList = document.getElementById("workspaceList");
         var promptEl = document.getElementById("prompt");
         var cwdEl = document.getElementById("cwd");
+        var chatTitle = document.getElementById("chatTitle");
+        var chatSubtitle = document.getElementById("chatSubtitle");
+        var sendBtn = document.getElementById("sendBtn");
 
         pairingInput.value = localStorage.getItem("pairingCode") || "";
         sessionInput.value = localStorage.getItem("sessionId") || "";
+        currentThreadId = localStorage.getItem("threadId") || "";
 
         function show(el, text) {
           el.textContent = text;
@@ -362,8 +473,8 @@ export const litePageHtml = String.raw`<!doctype html>
         }
 
         function connect() {
-          var pairingCode = pairingInput.value.replace(/^\s+|\s+$/g, "");
-          var sessionId = sessionInput.value.replace(/^\s+|\s+$/g, "");
+          var pairingCode = trim(pairingInput.value);
+          var sessionId = trim(sessionInput.value);
           connectWith(pairingCode, sessionId, false);
         }
 
@@ -423,9 +534,8 @@ export const litePageHtml = String.raw`<!doctype html>
             var summary = msg.payload && msg.payload.summary;
             sessionText.textContent = summary ? (summary.deviceName + " · " + summary.sessionId) : "已连接";
             show(connectMsg, "");
-            addSystemBubble("已连接到 Codex。");
             log("connected", msg.payload);
-            refreshThreads();
+            refreshThreads(currentThreadId);
             return;
           }
 
@@ -437,7 +547,7 @@ export const litePageHtml = String.raw`<!doctype html>
               show(connectMsg, "旧 Session ID 已失效，正在自动改为留空重连...");
               log("system", "retry without stale session id");
               setTimeout(function () {
-                connectWith(pairingInput.value.replace(/^\s+|\s+$/g, ""), "", true);
+                connectWith(trim(pairingInput.value), "", true);
               }, 250);
               return;
             }
@@ -483,85 +593,303 @@ export const litePageHtml = String.raw`<!doctype html>
         }
 
         function refreshThreads(preferredThreadId) {
-          var previousThreadId = preferredThreadId || threadSelect.value;
-          show(actionMsg, "正在刷新线程...");
-          rpc("thread.list", { limit: 25, archived: false }, function (res) {
-            if (!res.ok) {
-              show(actionMsg, res.error || "刷新失败");
+          var wanted = preferredThreadId || currentThreadId;
+          show(actionMsg, "正在刷新对话...");
+          rpc("thread.list", {
+            limit: 80,
+            archived: false,
+            sortKey: "updated_at",
+            sortDirection: "desc"
+          }, function (res) {
+            if (!res || !res.ok) {
+              show(actionMsg, (res && res.error) || "刷新失败");
               return;
             }
-            var result = res.result || {};
-            var list = result.data || result.threads || result.items || [];
-            threadCwdById = {};
-            threadSelect.innerHTML = '<option value="">新线程</option>';
-            for (var i = 0; i < list.length; i++) {
-              var thread = list[i];
-              var option = document.createElement("option");
-              option.value = thread.id;
-              option.setAttribute("data-cwd", thread.cwd || "");
-              option.textContent = thread.name || thread.preview || thread.id;
-              if (thread.id) {
-                threadCwdById[thread.id] = thread.cwd || "";
+            threads = extractList(res.result);
+            threadsById = {};
+            for (var i = 0; i < threads.length; i++) {
+              if (threads[i] && threads[i].id) {
+                threadsById[threads[i].id] = threads[i];
               }
-              threadSelect.appendChild(option);
             }
-            if (previousThreadId && threadCwdById[previousThreadId]) {
-              threadSelect.value = previousThreadId;
+            renderWorkspaces();
+            show(actionMsg, "已按工作目录分组 " + threads.length + " 个对话。");
+
+            if (wanted && threadsById[wanted]) {
+              selectThread(wanted, true);
+            } else if (!currentThreadId && threads[0] && threads[0].id) {
+              selectThread(threads[0].id, true);
+            } else if (currentThreadId && !threadsById[currentThreadId]) {
+              startNewThread(false);
             }
-            show(actionMsg, "线程已刷新，共 " + list.length + " 个。");
           });
+        }
+
+        function renderWorkspaces() {
+          workspaceList.innerHTML = "";
+          var groups = groupThreadsByCwd(threads);
+          if (!groups.length) {
+            var empty = document.createElement("div");
+            empty.className = "empty-state";
+            empty.textContent = "还没有历史对话。填入工作目录并发送第一条消息即可新建。";
+            workspaceList.appendChild(empty);
+            return;
+          }
+
+          for (var i = 0; i < groups.length; i++) {
+            workspaceList.appendChild(renderWorkspaceGroup(groups[i]));
+          }
+        }
+
+        function renderWorkspaceGroup(group) {
+          var wrap = document.createElement("section");
+          wrap.className = "workspace-group";
+
+          var head = document.createElement("div");
+          head.className = "workspace-head";
+
+          var title = document.createElement("div");
+          var name = document.createElement("span");
+          name.className = "workspace-name";
+          name.textContent = workspaceName(group.cwd);
+          var path = document.createElement("span");
+          path.className = "workspace-path";
+          path.textContent = group.cwd || "未设置工作目录";
+          title.appendChild(name);
+          title.appendChild(path);
+
+          var newBtn = document.createElement("button");
+          newBtn.type = "button";
+          newBtn.className = "ghost";
+          newBtn.textContent = "在此新建";
+          newBtn.onclick = function () {
+            cwdEl.value = group.cwd || "";
+            startNewThread(true);
+          };
+
+          head.appendChild(title);
+          head.appendChild(newBtn);
+          wrap.appendChild(head);
+
+          var list = document.createElement("div");
+          list.className = "thread-list";
+          for (var i = 0; i < group.threads.length; i++) {
+            list.appendChild(renderThreadButton(group.threads[i]));
+          }
+          wrap.appendChild(list);
+          return wrap;
+        }
+
+        function renderThreadButton(thread) {
+          var btn = document.createElement("button");
+          btn.type = "button";
+          btn.className = thread.id === currentThreadId ? "thread-item selected" : "thread-item";
+          btn.onclick = function () {
+            selectThread(thread.id, true);
+          };
+
+          var title = document.createElement("span");
+          title.className = "thread-title";
+          title.textContent = threadTitle(thread);
+
+          var meta = document.createElement("span");
+          meta.className = "thread-meta";
+          meta.textContent = formatThreadTime(thread);
+
+          btn.appendChild(title);
+          btn.appendChild(meta);
+          return btn;
+        }
+
+        function selectThread(threadId, loadHistory) {
+          var thread = threadsById[threadId];
+          if (!thread) return;
+
+          currentThreadId = threadId;
+          currentThreadCwd = thread.cwd || "";
+          localStorage.setItem("threadId", threadId);
+          cwdEl.value = currentThreadCwd;
+          bubbleByItemId = {};
+          lastAssistantBubble = null;
+          updateChatHeader(thread);
+          renderWorkspaces();
+
+          if (loadHistory) {
+            loadThreadHistory(threadId);
+          }
+        }
+
+        function startNewThread(focusPrompt) {
+          currentThreadId = "";
+          currentThreadCwd = trim(cwdEl.value);
+          localStorage.removeItem("threadId");
+          bubbleByItemId = {};
+          lastAssistantBubble = null;
+          updateChatHeader(null);
+          renderWorkspaces();
+          renderEmpty("正在新建对话。第一条消息会使用当前工作目录。");
+          if (focusPrompt) promptEl.focus();
+        }
+
+        function updateChatHeader(thread) {
+          if (!thread) {
+            chatTitle.textContent = "新对话";
+            chatSubtitle.textContent = trim(cwdEl.value) || "未设置工作目录";
+            return;
+          }
+          chatTitle.textContent = threadTitle(thread);
+          chatSubtitle.textContent = thread.cwd || "未设置工作目录";
+        }
+
+        function loadThreadHistory(threadId) {
+          renderEmpty("正在加载历史记录...");
+          show(actionMsg, "正在加载对话历史...");
+          rpc("thread.read", { threadId: threadId, includeTurns: true }, function (res) {
+            if (!res || !res.ok) {
+              show(actionMsg, (res && res.error) || "历史加载失败");
+              renderEmpty("历史加载失败。可以刷新后再试。");
+              return;
+            }
+
+            var thread = normalizeThread(res.result) || threadsById[threadId] || { id: threadId };
+            rememberThread(thread);
+            var turns = normalizeTurns(thread.turns);
+            if (hasRenderableItems(turns)) {
+              renderHistory(thread, turns);
+              show(actionMsg, "已加载历史记录。");
+              return;
+            }
+
+            loadThreadTurnsFallback(threadId, thread);
+          });
+        }
+
+        function loadThreadTurnsFallback(threadId, thread) {
+          rpc("thread.turns.list", {
+            threadId: threadId,
+            limit: 100,
+            sortDirection: "asc"
+          }, function (res) {
+            if (!res || !res.ok) {
+              renderHistory(thread, []);
+              show(actionMsg, "已加载线程信息，但没有可显示的历史明细。");
+              return;
+            }
+            var turns = normalizeTurns((res.result && res.result.data) || res.result);
+            renderHistory(thread, turns);
+            show(actionMsg, "已加载历史记录。");
+          });
+        }
+
+        function renderHistory(thread, turns) {
+          bubbleByItemId = {};
+          lastAssistantBubble = null;
+          chatLog.innerHTML = "";
+          var orderedTurns = turns.slice().sort(compareTurns);
+          var count = 0;
+          for (var i = 0; i < orderedTurns.length; i++) {
+            var items = Array.isArray(orderedTurns[i].items) ? orderedTurns[i].items : [];
+            for (var j = 0; j < items.length; j++) {
+              var rendered = renderHistoryItem(items[j], orderedTurns[i]);
+              if (rendered) count++;
+            }
+          }
+
+          if (!count) {
+            renderEmpty("这个对话暂时没有可显示的历史消息。");
+          }
+          rememberThread(thread);
+          updateChatHeader(thread);
+          scrollChat();
+        }
+
+        function renderHistoryItem(item, turn) {
+          if (!item || !item.type) return false;
+          if (item.type === "userMessage") {
+            var userText = userContentToText(item.content);
+            if (!userText) return false;
+            addBubble("user", userText, formatTurnTime(turn), item.id);
+            return true;
+          }
+          if (item.type === "agentMessage") {
+            if (!item.text) return false;
+            addBubble("assistant", item.text, "Codex · " + formatTurnTime(turn), item.id);
+            return true;
+          }
+          if (item.type === "plan" && item.text) {
+            addBubble("system", "计划\n" + item.text, formatTurnTime(turn), item.id);
+            return true;
+          }
+          if (item.type === "commandExecution") {
+            var output = item.aggregatedOutput ? "\n\n" + shorten(item.aggregatedOutput, 3000) : "";
+            addBubble("system", "命令\n" + item.command + output, formatTurnTime(turn), item.id);
+            return true;
+          }
+          return false;
         }
 
         function sendPrompt(event) {
           if (event && event.preventDefault) event.preventDefault();
-          var prompt = promptEl.value.replace(/^\s+|\s+$/g, "");
+          var prompt = trim(promptEl.value);
           if (!prompt) {
             show(actionMsg, "请输入消息。");
             return;
           }
 
-          var threadId = threadSelect.value;
+          sendBtn.disabled = true;
           addBubble("user", prompt);
           promptEl.value = "";
           autoSizePrompt();
           show(actionMsg, "正在发送...");
-          if (threadId) {
-            var selected = threadSelect.options[threadSelect.selectedIndex];
-            var threadCwd = selected ? selected.getAttribute("data-cwd") : threadCwdById[threadId];
-            rpc("turn.start", { threadId: threadId, prompt: prompt, cwd: threadCwd || undefined }, afterSend);
+
+          if (currentThreadId) {
+            rpc("turn.start", {
+              threadId: currentThreadId,
+              prompt: prompt,
+              cwd: currentThreadCwd || undefined
+            }, afterSend);
           } else {
+            var cwd = trim(cwdEl.value);
+            currentThreadCwd = cwd;
+            updateChatHeader(null);
             rpc("thread.start", {
               prompt: prompt,
-              cwd: cwdEl.value.replace(/^\s+|\s+$/g, "") || undefined
+              cwd: cwd || undefined
             }, afterSend);
           }
         }
 
         function afterSend(res) {
-          if (!res.ok) {
-            show(actionMsg, res.error || "发送失败");
-            addSystemBubble(res.error || "发送失败");
+          sendBtn.disabled = false;
+          if (!res || !res.ok) {
+            show(actionMsg, (res && res.error) || "发送失败");
+            addSystemBubble((res && res.error) || "发送失败");
             return;
           }
-          var preferredThreadId = threadSelect.value;
-          if (!preferredThreadId && res.result && res.result.thread && res.result.thread.id) {
-            preferredThreadId = res.result.thread.id;
+          var threadId = currentThreadId || extractThreadId(res.result);
+          if (threadId) {
+            currentThreadId = threadId;
+            localStorage.setItem("threadId", threadId);
           }
           show(actionMsg, "已发送，等待 Codex 回复。");
-          refreshThreads(preferredThreadId);
+          refreshThreads(threadId);
         }
 
         function handleCodexEvent(message) {
           if (!message || !message.method) return;
 
+          var params = message.params || {};
+          if (params.threadId && currentThreadId && params.threadId !== currentThreadId) {
+            return;
+          }
+
           if (message.method === "item/agentMessage/delta") {
-            var params = message.params || {};
             appendAssistantDelta(params.itemId || params.turnId || "active", params.delta || "");
             return;
           }
 
           if (message.method === "item/completed") {
-            var item = message.params && message.params.item;
+            var item = params.item;
             if (item && item.type === "agentMessage" && item.text) {
               setAssistantText(item.id || "completed-" + Date.now(), item.text);
             }
@@ -576,36 +904,43 @@ export const litePageHtml = String.raw`<!doctype html>
 
           if (message.method === "turn/completed") {
             show(actionMsg, "Codex 已完成回复。");
+            if (currentThreadId) refreshThreads(currentThreadId);
           }
         }
 
-        function clearEmptyState() {
-          var empty = chatLog.querySelector(".empty-state");
-          if (empty) empty.parentNode.removeChild(empty);
-        }
-
-        function addBubble(role, text) {
+        function addBubble(role, text, meta, itemId) {
           clearEmptyState();
           var row = document.createElement("div");
           row.className = "bubble-row " + role;
           var bubble = document.createElement("div");
           bubble.className = "bubble " + role;
-          if (role === "assistant") {
-            var meta = document.createElement("div");
-            meta.className = "bubble-meta";
-            meta.textContent = "Codex · " + new Date().toLocaleTimeString();
-            bubble.appendChild(meta);
-            var body = document.createElement("div");
-            body.setAttribute("data-body", "1");
-            body.textContent = text || "";
-            bubble.appendChild(body);
-          } else {
-            bubble.textContent = text || "";
+          var body;
+
+          if (meta) {
+            var metaEl = document.createElement("div");
+            metaEl.className = "bubble-meta";
+            metaEl.textContent = meta;
+            bubble.appendChild(metaEl);
+          } else if (role === "assistant") {
+            var assistantMeta = document.createElement("div");
+            assistantMeta.className = "bubble-meta";
+            assistantMeta.textContent = "Codex · " + new Date().toLocaleTimeString();
+            bubble.appendChild(assistantMeta);
           }
+
+          body = document.createElement("div");
+          body.setAttribute("data-body", "1");
+          body.textContent = text || "";
+          bubble.appendChild(body);
           row.appendChild(bubble);
           chatLog.appendChild(row);
+
+          if (itemId) {
+            bubbleByItemId[itemId] = body;
+            if (role === "assistant") lastAssistantBubble = body;
+          }
           scrollChat();
-          return bubble.querySelector("[data-body]") || bubble;
+          return body;
         }
 
         function addSystemBubble(text) {
@@ -635,18 +970,149 @@ export const litePageHtml = String.raw`<!doctype html>
           scrollChat();
         }
 
+        function renderEmpty(text) {
+          chatLog.innerHTML = "";
+          var empty = document.createElement("div");
+          empty.className = "empty-state";
+          empty.textContent = text;
+          chatLog.appendChild(empty);
+        }
+
+        function clearEmptyState() {
+          var empty = chatLog.querySelector(".empty-state");
+          if (empty) empty.parentNode.removeChild(empty);
+        }
+
         function scrollChat() {
           chatLog.scrollTop = chatLog.scrollHeight;
         }
 
         function autoSizePrompt() {
           promptEl.style.height = "auto";
-          promptEl.style.height = Math.min(promptEl.scrollHeight, 140) + "px";
+          promptEl.style.height = Math.min(promptEl.scrollHeight, 150) + "px";
+        }
+
+        function extractList(result) {
+          var list = result && (result.data || result.threads || result.items);
+          if (!Array.isArray(list) && Array.isArray(result)) list = result;
+          return Array.isArray(list) ? list : [];
+        }
+
+        function normalizeThread(result) {
+          if (!result) return null;
+          if (result.thread) return result.thread;
+          return result.id ? result : null;
+        }
+
+        function normalizeTurns(value) {
+          if (Array.isArray(value)) return value;
+          if (value && Array.isArray(value.turns)) return value.turns;
+          if (value && Array.isArray(value.data)) return value.data;
+          return [];
+        }
+
+        function hasRenderableItems(turns) {
+          for (var i = 0; i < turns.length; i++) {
+            if (turns[i] && Array.isArray(turns[i].items) && turns[i].items.length) {
+              return true;
+            }
+          }
+          return false;
+        }
+
+        function rememberThread(thread) {
+          if (!thread || !thread.id) return;
+          threadsById[thread.id] = Object.assign({}, threadsById[thread.id] || {}, thread);
+          if (thread.id === currentThreadId) {
+            currentThreadCwd = thread.cwd || currentThreadCwd;
+            cwdEl.value = currentThreadCwd;
+          }
+        }
+
+        function groupThreadsByCwd(list) {
+          var map = {};
+          var order = [];
+          for (var i = 0; i < list.length; i++) {
+            var thread = list[i];
+            var cwd = thread && thread.cwd ? thread.cwd : "";
+            if (!map[cwd]) {
+              map[cwd] = { cwd: cwd, threads: [] };
+              order.push(cwd);
+            }
+            map[cwd].threads.push(thread);
+          }
+          return order.map(function (cwd) { return map[cwd]; });
+        }
+
+        function workspaceName(cwd) {
+          if (!cwd) return "未设置工作目录";
+          var clean = cwd.replace(/[\\\/]+$/, "");
+          var parts = clean.split(/[\\\/]/);
+          return parts[parts.length - 1] || clean;
+        }
+
+        function threadTitle(thread) {
+          return (thread && (thread.name || thread.preview || thread.id)) || "未命名对话";
+        }
+
+        function formatThreadTime(thread) {
+          var timestamp = thread && (thread.updatedAt || thread.createdAt);
+          return timestamp ? formatTimestamp(timestamp) : "无时间信息";
+        }
+
+        function formatTurnTime(turn) {
+          var timestamp = turn && (turn.completedAt || turn.startedAt);
+          return timestamp ? formatTimestamp(timestamp) : new Date().toLocaleTimeString();
+        }
+
+        function formatTimestamp(value) {
+          var ms = value < 1000000000000 ? value * 1000 : value;
+          return new Date(ms).toLocaleString();
+        }
+
+        function compareTurns(a, b) {
+          var av = (a && (a.startedAt || a.completedAt)) || 0;
+          var bv = (b && (b.startedAt || b.completedAt)) || 0;
+          return av - bv;
+        }
+
+        function userContentToText(content) {
+          if (!Array.isArray(content)) return "";
+          var parts = [];
+          for (var i = 0; i < content.length; i++) {
+            var item = content[i];
+            if (!item) continue;
+            if (item.type === "text") parts.push(item.text || "");
+            if (item.type === "image") parts.push("[图片] " + (item.url || ""));
+            if (item.type === "localImage") parts.push("[本地图片] " + (item.path || ""));
+            if (item.type === "mention") parts.push("@" + (item.name || item.path || "mention"));
+            if (item.type === "skill") parts.push("[技能] " + (item.name || item.path || ""));
+          }
+          return parts.filter(Boolean).join("\n");
+        }
+
+        function extractThreadId(result) {
+          if (result && result.thread && result.thread.id) return result.thread.id;
+          if (result && result.id) return result.id;
+          return "";
+        }
+
+        function shorten(text, max) {
+          if (!text || text.length <= max) return text || "";
+          return text.slice(0, max) + "\n...已截断 " + (text.length - max) + " 字符";
+        }
+
+        function trim(value) {
+          return String(value || "").replace(/^\s+|\s+$/g, "");
         }
 
         document.getElementById("connectBtn").onclick = connect;
-        document.getElementById("refreshBtn").onclick = function () { refreshThreads(); };
+        document.getElementById("refreshBtn").onclick = function () { refreshThreads(currentThreadId); };
+        document.getElementById("newThreadBtn").onclick = function () { startNewThread(true); };
         document.getElementById("composer").onsubmit = sendPrompt;
+        cwdEl.addEventListener("input", function () {
+          if (!currentThreadId) updateChatHeader(null);
+        });
         promptEl.addEventListener("input", autoSizePrompt);
         promptEl.addEventListener("keydown", function (event) {
           if (event.key === "Enter" && !event.shiftKey) {

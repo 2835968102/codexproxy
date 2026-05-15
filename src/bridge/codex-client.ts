@@ -57,6 +57,8 @@ export class CodexAppServerClient {
         return this.listThreads(params);
       case "thread.read":
         return this.readThread(params);
+      case "thread.turns.list":
+        return this.listTurns(params);
       case "thread.start":
         return this.startThread(params);
       case "turn.start":
@@ -84,7 +86,7 @@ export class CodexAppServerClient {
           ...(isRecord(params) ? params : {})
         });
     this.rememberThreads(result);
-    return result;
+    return this.withRememberedThreadMetadata(result);
   }
 
   private async readThread(params: unknown) {
@@ -93,7 +95,22 @@ export class CodexAppServerClient {
           ...(isRecord(params) ? params : {})
         });
     this.rememberThreads(result);
-    return result;
+    return this.withRememberedThreadMetadata(result);
+  }
+
+  private async listTurns(params: unknown) {
+    const values = isRecord(params) ? params : {};
+    const threadId = typeof values.threadId === "string" ? values.threadId : undefined;
+    if (!threadId) {
+      throw new Error("thread.turns.list requires threadId.");
+    }
+
+    return this.request("thread/turns/list", {
+      limit: 100,
+      sortDirection: "asc",
+      ...values,
+      threadId
+    });
   }
 
   private startLocalAppServer() {
@@ -262,8 +279,9 @@ export class CodexAppServerClient {
   private async startThread(params: unknown) {
     const values = isRecord(params) ? params : {};
     const prompt = typeof values.prompt === "string" ? values.prompt : "";
+    const cwd = typeof values.cwd === "string" && values.cwd.trim() ? values.cwd : undefined;
     const threadResult = await this.request("thread/start", {
-      cwd: typeof values.cwd === "string" ? values.cwd : undefined,
+      cwd,
       model: typeof values.model === "string" ? values.model : undefined,
       approvalPolicy: typeof values.approvalPolicy === "string" ? values.approvalPolicy : undefined,
       sandbox: typeof values.sandbox === "string" ? values.sandbox : undefined
@@ -272,24 +290,33 @@ export class CodexAppServerClient {
     const thread = isRecord(threadResult) && isRecord(threadResult.thread) ? threadResult.thread : undefined;
     const threadId = typeof thread?.id === "string" ? thread.id : undefined;
     this.rememberThread(thread);
+    if (threadId && cwd) {
+      this.threadMetadata.set(threadId, { cwd });
+    }
     if (prompt.trim() && threadId) {
       await this.request("turn/start", {
         threadId,
-        cwd: typeof values.cwd === "string" ? values.cwd : undefined,
+        cwd,
         input: [textInput(prompt)]
       });
     }
 
-    return threadResult;
+    return this.withRememberedThreadMetadata(threadResult);
   }
 
   private async startTurn(params: unknown) {
     const values = isRecord(params) ? params : {};
     const threadId = typeof values.threadId === "string" ? values.threadId : undefined;
     const prompt = typeof values.prompt === "string" ? values.prompt : undefined;
-    const cwd = typeof values.cwd === "string" ? values.cwd : this.threadMetadata.get(threadId ?? "")?.cwd;
+    const cwd =
+      typeof values.cwd === "string" && values.cwd.trim()
+        ? values.cwd
+        : this.threadMetadata.get(threadId ?? "")?.cwd;
     if (!threadId || !prompt) {
       throw new Error("turn.start requires threadId and prompt.");
+    }
+    if (cwd) {
+      this.threadMetadata.set(threadId, { cwd });
     }
 
     try {
@@ -389,9 +416,38 @@ export class CodexAppServerClient {
     if (!isRecord(thread) || typeof thread.id !== "string") {
       return;
     }
-    const cwd = typeof thread.cwd === "string" ? thread.cwd : undefined;
+    const cwd = typeof thread.cwd === "string" ? thread.cwd : findCwd(thread);
     if (cwd) {
       this.threadMetadata.set(thread.id, { cwd });
+    }
+  }
+
+  private withRememberedThreadMetadata(result: unknown) {
+    if (!isRecord(result)) {
+      return result;
+    }
+    if (Array.isArray(result.data)) {
+      result.data.forEach((thread) => this.applyRememberedThreadMetadata(thread));
+    }
+    if (Array.isArray(result.threads)) {
+      result.threads.forEach((thread) => this.applyRememberedThreadMetadata(thread));
+    }
+    if (Array.isArray(result.items)) {
+      result.items.forEach((thread) => this.applyRememberedThreadMetadata(thread));
+    }
+    if (isRecord(result.thread)) {
+      this.applyRememberedThreadMetadata(result.thread);
+    }
+    return result;
+  }
+
+  private applyRememberedThreadMetadata(thread: unknown) {
+    if (!isRecord(thread) || typeof thread.id !== "string") {
+      return;
+    }
+    const remembered = this.threadMetadata.get(thread.id);
+    if (remembered?.cwd && typeof thread.cwd !== "string") {
+      thread.cwd = remembered.cwd;
     }
   }
 }
@@ -408,4 +464,32 @@ function shouldUseShell(command: string): boolean {
 function isThreadNotFoundError(error: unknown): boolean {
   const message = error instanceof Error ? error.message : String(error);
   return message.includes("thread not found");
+}
+
+function findCwd(value: unknown): string | undefined {
+  if (Array.isArray(value)) {
+    for (const item of value) {
+      const cwd = findCwd(item);
+      if (cwd) {
+        return cwd;
+      }
+    }
+    return undefined;
+  }
+
+  if (!isRecord(value)) {
+    return undefined;
+  }
+
+  if (typeof value.cwd === "string" && value.cwd.trim()) {
+    return value.cwd;
+  }
+
+  for (const nested of Object.values(value)) {
+    const cwd = findCwd(nested);
+    if (cwd) {
+      return cwd;
+    }
+  }
+  return undefined;
 }

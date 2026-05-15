@@ -49,6 +49,7 @@ function connectRelay() {
         "codex.status",
         "thread.list",
         "thread.read",
+        "thread.turns.list",
         "thread.start",
         "turn.start",
         "turn.steer",
