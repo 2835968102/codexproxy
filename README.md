@@ -22,6 +22,17 @@ flowchart LR
 
 `codex app-server` is the local Codex WebSocket API on the Windows machine. Do not expose it to the internet. Only the bridge talks to it over loopback.
 
+## Config Files
+
+There are two different config file formats:
+
+| Used by | File | Format |
+| --- | --- | --- |
+| Linux relay | `~/codexproxy/.env` | `KEY=value` env file |
+| Windows bridge | `codexproxy.local.json` | JSON |
+
+Do not put the JSON config into `.env`. The Linux `.env` must look like `deploy/env.example`; the Windows JSON config must look like `codexproxy.local.example.json`.
+
 ## Linux Relay Deployment
 
 Use this on the server/VPS. The relay runs in Docker Compose.
@@ -40,7 +51,7 @@ curl -fsSLo compose.yml https://raw.githubusercontent.com/2835968102/codexproxy/
 curl -fsSLo .env https://raw.githubusercontent.com/2835968102/codexproxy/main/deploy/env.example
 ```
 
-Edit `.env`:
+Edit `.env`. This file is not JSON:
 
 ```env
 PORT=8787
@@ -105,7 +116,7 @@ Create local config:
 Copy-Item codexproxy.local.example.json codexproxy.local.json
 ```
 
-For a Linux relay at `http://150.158.38.34:8787`, edit `codexproxy.local.json` to keep only the bridge settings:
+For a Linux relay at `http://150.158.38.34:8787`, edit `codexproxy.local.json`. This file is JSON:
 
 ```json
 {
@@ -183,7 +194,7 @@ Create local config:
 Copy-Item codexproxy.local.example.json codexproxy.local.json
 ```
 
-For all-local development, set both `server` and `bridge` in `codexproxy.local.json`:
+For all-local development, set both `server` and `bridge` in `codexproxy.local.json`. This is JSON, not `.env`:
 
 ```json
 {
