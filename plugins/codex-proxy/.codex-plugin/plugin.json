@@ -1,0 +1,32 @@
+{
+  "name": "codex-proxy",
+  "version": "0.1.0",
+  "description": "Connect a local Codex app-server to a remote Codex Proxy relay.",
+  "author": {
+    "name": "Local",
+    "email": "local@example.com",
+    "url": "https://example.com"
+  },
+  "homepage": "https://example.com/codex-proxy",
+  "repository": "https://example.com/codex-proxy",
+  "license": "MIT",
+  "keywords": ["codex", "remote-control", "relay"],
+  "skills": "./skills/",
+  "interface": {
+    "displayName": "Codex Proxy",
+    "shortDescription": "Bridge local Codex to a phone-accessible relay.",
+    "longDescription": "Codex Proxy packages instructions for running the local bridge that connects Codex app-server to a secured relay server and mobile web controller.",
+    "developerName": "Local",
+    "category": "Productivity",
+    "capabilities": ["Interactive"],
+    "websiteURL": "https://example.com/codex-proxy",
+    "privacyPolicyURL": "https://example.com/privacy",
+    "termsOfServiceURL": "https://example.com/terms",
+    "defaultPrompt": [
+      "Help me connect this Codex to my phone.",
+      "Show Codex Proxy bridge status.",
+      "Explain safe remote Codex control."
+    ],
+    "brandColor": "#202020"
+  }
+}

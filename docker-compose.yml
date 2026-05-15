@@ -1,0 +1,13 @@
+services:
+  codexproxy:
+    build: .
+    image: codexproxy:latest
+    container_name: codexproxy
+    restart: unless-stopped
+    ports:
+      - "${PORT:-8787}:8787"
+    environment:
+      PORT: "8787"
+      PUBLIC_BASE_URL: "${PUBLIC_BASE_URL:-http://localhost:8787}"
+      RELAY_TOKEN: "${RELAY_TOKEN:?set RELAY_TOKEN in .env or shell}"
+      PAIRING_CODE: "${PAIRING_CODE:?set PAIRING_CODE in .env or shell}"
