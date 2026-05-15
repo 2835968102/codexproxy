@@ -1,37 +1,40 @@
 # Codex Proxy
 
-Codex Proxy lets a phone browser control a desktop Codex session through a relay server.
+Codex Proxy lets a phone browser control a Codex session through a relay server.
 
 It has three parts:
 
 1. Linux relay server: runs in Docker Compose and serves `/lite` plus `/ws`.
-2. Windows bridge: runs beside Codex, connects to the relay, and starts `codex app-server`.
-3. Phone web UI: opens the relay URL and sends messages to the Windows Codex session.
+2. Bridge: connects the relay to an existing `codex app-server`. It can run directly on Windows, or as a lightweight Linux Docker container.
+3. Phone web UI: opens the relay URL and sends messages through the bridge to Codex.
 
-The relay authenticates the Windows bridge with `RELAY_TOKEN`, authenticates the phone with `PAIRING_CODE`, and forwards whitelisted Codex control requests through the bridge.
+The relay authenticates bridges with `RELAY_TOKEN`, authenticates the phone with `PAIRING_CODE`, and forwards whitelisted Codex control requests through the selected bridge session.
+
+The Linux bridge image does not include Codex CLI. It only runs the bridge process and connects to a `codex app-server` that is already running on the Linux host.
 
 ## Architecture
 
 ```mermaid
 flowchart LR
   Phone["Phone browser /lite"] <--> Relay["Linux relay server /ws"]
-  Bridge["Windows bridge"] <--> Relay
+  Bridge["Bridge"] <--> Relay
   Bridge <--> AppServer["codex app-server on 127.0.0.1"]
-  AppServer <--> Codex["Desktop Codex session state"]
+  AppServer <--> Codex["Codex session state"]
 ```
 
-`codex app-server` is the local Codex WebSocket API on the Windows machine. Do not expose it to the internet. Only the bridge talks to it over loopback.
+`codex app-server` is the local Codex WebSocket API. Do not expose it to the internet. Only the bridge should talk to it, preferably over loopback.
 
 ## Config Files
 
-There are two different config file formats:
+There are two config file formats:
 
 | Used by | File | Format |
 | --- | --- | --- |
 | Linux relay | `~/codexproxy/.env` | `KEY=value` env file |
 | Windows bridge | `codexproxy.local.json` | JSON |
+| Linux bridge container | `~/codexproxy-bridge/.env` | `KEY=value` env file |
 
-Do not put the JSON config into `.env`. The Linux `.env` must look like `deploy/env.example`; the Windows JSON config must look like `codexproxy.local.example.json`.
+Do not put the JSON config into `.env`. The relay `.env` must look like `deploy/env.example`; the Linux bridge `.env` must look like `deploy/bridge.env.example`; the Windows JSON config must look like `codexproxy.local.example.json`.
 
 ## Linux Relay Deployment
 
@@ -95,11 +98,11 @@ Phone URL:
 http://your-server-ip:8787/lite
 ```
 
-If you use HTTPS with Caddy or Nginx, proxy `/` and `/ws` to `127.0.0.1:8787`, set `PUBLIC_BASE_URL=https://your-domain.example`, and use `wss://your-domain.example/ws` in the Windows bridge config.
+If you use HTTPS with Caddy or Nginx, proxy `/` and `/ws` to `127.0.0.1:8787`, set `PUBLIC_BASE_URL=https://your-domain.example`, and use `wss://your-domain.example/ws` in the bridge config.
 
 ## Windows Bridge Deployment
 
-Use this on the Windows computer that runs Codex. The bridge must stay on the Codex computer because it controls the local Codex client.
+Use this on the Windows computer that runs Codex. This mode can auto-start `codex app-server` because the bridge process runs directly on the same Windows host as Codex.
 
 Clone and install:
 
@@ -134,7 +137,7 @@ For a Linux relay at `http://150.158.38.34:8787`, edit `codexproxy.local.json`. 
 
 Replace `<you>` with your Windows user name, or leave `codexBin` empty if the `codex` command is already available in PowerShell.
 
-`bridge.relayToken` must be the same value as `RELAY_TOKEN` in the Linux server `.env`.
+`bridge.relayToken` must be the same value as `RELAY_TOKEN` in the Linux relay `.env`.
 
 Start the bridge:
 
@@ -150,6 +153,69 @@ bridge connected: ...
 
 If Codex is installed somewhere else, update `bridge.codexBin`. If Codex is already on `PATH`, you can leave `codexBin` empty.
 
+## Linux Bridge Container Deployment
+
+Use this only when the Codex environment you want to control is on the Linux host. The bridge container does not include Codex CLI and does not run Codex itself.
+
+First, make sure Codex works on the Linux host:
+
+```bash
+codex --version
+```
+
+Start `codex app-server` on the Linux host and keep it running:
+
+```bash
+codex app-server --listen ws://127.0.0.1:53179
+```
+
+Then create a bridge Compose directory:
+
+```bash
+mkdir -p ~/codexproxy-bridge
+cd ~/codexproxy-bridge
+curl -fsSLo compose.yml https://raw.githubusercontent.com/2835968102/codexproxy/main/deploy/bridge.compose.yml
+curl -fsSLo .env https://raw.githubusercontent.com/2835968102/codexproxy/main/deploy/bridge.env.example
+```
+
+Edit `.env`. This file is not JSON:
+
+```env
+RELAY_URL=ws://your-relay-server:8787/ws
+RELAY_TOKEN=same-value-as-linux-relay-RELAY_TOKEN
+CODEX_PROXY_DEVICE_NAME=Linux Codex Bridge
+CODEX_APP_SERVER_URL=ws://127.0.0.1:53179
+CODEX_AUTO_START_APP_SERVER=false
+ALLOW_RAW_RPC=false
+```
+
+If the relay runs on the same Linux host, `RELAY_URL=ws://127.0.0.1:8787/ws` is OK because `deploy/bridge.compose.yml` uses host networking. If the relay is on another server, use that server's IP or domain.
+
+Start the bridge container:
+
+```bash
+sudo docker compose pull
+sudo docker compose up -d
+```
+
+Update later:
+
+```bash
+cd ~/codexproxy-bridge
+sudo docker compose pull
+sudo docker compose up -d
+```
+
+Check logs:
+
+```bash
+sudo docker compose logs -f
+```
+
+When you create a new thread from the phone, the working directory must be a path that the Linux host Codex can see, for example `/home/ubuntu/projects/my-repo`. You do not need to mount that project into the bridge container, because Codex is running outside the bridge container.
+
+If Codex itself is running inside another container, the working directory must be valid inside that Codex container. That is a separate deployment shape from this bridge-only image.
+
 ## Phone Connection
 
 Open:
@@ -158,10 +224,11 @@ Open:
 http://your-server-ip:8787/lite
 ```
 
-Enter the `PAIRING_CODE` from the Linux server `.env`.
+Enter the `PAIRING_CODE` from the Linux relay `.env`.
 
 The phone can:
 
+- View bridge sessions.
 - View Codex threads grouped by working directory.
 - Load thread history into chat bubbles.
 - Start a new thread with an optional working directory.
@@ -170,15 +237,16 @@ The phone can:
 
 ## Token Rules
 
-`RELAY_TOKEN` is one shared secret used by both sides:
+`RELAY_TOKEN` is one shared secret used by the relay and every bridge:
 
 ```text
-Linux .env RELAY_TOKEN  ==  Windows bridge.relayToken
+Linux relay .env RELAY_TOKEN  ==  Windows bridge.relayToken
+Linux relay .env RELAY_TOKEN  ==  Linux bridge .env RELAY_TOKEN
 ```
 
 `PAIRING_CODE` is only for the phone web UI.
 
-Keep both private. If they leak, rotate them in Linux `.env`, restart Compose, then update `codexproxy.local.json` on Windows and restart the bridge.
+Keep both private. If they leak, rotate them in the Linux relay `.env`, restart relay Compose, then update every bridge config and restart each bridge.
 
 ## Local Development
 
@@ -228,7 +296,7 @@ Config priority is: real environment variables, then `codexproxy.local.json`, th
 
 ## Security Notes
 
-This project can control a local Codex instance, so treat it like remote administration:
+This project can control a Codex instance, so treat it like remote administration:
 
 - Use HTTPS/WSS in production when possible.
 - Keep `RELAY_TOKEN` long and private.
@@ -245,12 +313,23 @@ After pushing to `main`, GitHub Actions builds and publishes:
 
 ```text
 ghcr.io/2835968102/codexproxy:latest
+ghcr.io/2835968102/codexproxy-bridge:latest
 ```
 
-Tagging a release such as `v0.1.0` also publishes a matching image tag:
+Tagging a release such as `v0.1.0` also publishes matching image tags:
 
 ```bash
 git tag v0.1.0
 git push origin v0.1.0
 docker pull ghcr.io/2835968102/codexproxy:v0.1.0
+docker pull ghcr.io/2835968102/codexproxy-bridge:v0.1.0
 ```
+
+To build locally:
+
+```bash
+docker build --target relay -t codexproxy:relay .
+docker build --target bridge -t codexproxy:bridge .
+```
+
+The publish build is complete when the GitHub Actions `Docker image` workflow is green and the GHCR package shows the expected tag.

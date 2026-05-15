@@ -1,0 +1,13 @@
+services:
+  bridge:
+    image: ${CODEXPROXY_BRIDGE_IMAGE:-ghcr.io/2835968102/codexproxy-bridge:latest}
+    container_name: codexproxy-bridge
+    restart: unless-stopped
+    network_mode: host
+    environment:
+      RELAY_URL: "${RELAY_URL:?set RELAY_URL in .env}"
+      RELAY_TOKEN: "${RELAY_TOKEN:?set RELAY_TOKEN in .env}"
+      CODEX_PROXY_DEVICE_NAME: "${CODEX_PROXY_DEVICE_NAME:-Linux Codex Bridge}"
+      CODEX_APP_SERVER_URL: "${CODEX_APP_SERVER_URL:-ws://127.0.0.1:53179}"
+      CODEX_AUTO_START_APP_SERVER: "${CODEX_AUTO_START_APP_SERVER:-false}"
+      ALLOW_RAW_RPC: "${ALLOW_RAW_RPC:-false}"
