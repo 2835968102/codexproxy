@@ -169,6 +169,31 @@ Start `codex app-server` on the Linux host and keep it running:
 codex app-server --listen ws://127.0.0.1:53179
 ```
 
+For a server deployment, you can keep it alive with systemd. Replace `ubuntu` and the `codex` path if your user or install path is different:
+
+```bash
+command -v codex
+sudo tee /etc/systemd/system/codex-app-server.service >/dev/null <<'EOF'
+[Unit]
+Description=Codex app-server
+After=network.target
+
+[Service]
+User=ubuntu
+WorkingDirectory=/home/ubuntu
+Environment=PATH=/usr/local/bin:/usr/bin:/bin
+ExecStart=/usr/bin/env codex app-server --listen ws://127.0.0.1:53179
+Restart=always
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target
+EOF
+sudo systemctl daemon-reload
+sudo systemctl enable --now codex-app-server
+sudo systemctl status codex-app-server
+```
+
 Then create a bridge Compose directory:
 
 ```bash
