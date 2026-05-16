@@ -15,8 +15,18 @@ export type DesktopBridgeConfig = {
 export type DesktopState = {
   running: boolean;
   config: DesktopBridgeConfig;
+  update: DesktopUpdateState;
   status?: BridgeRuntimeStatus;
   logs: BridgeRuntimeLog[];
+};
+
+export type DesktopUpdateState = {
+  currentVersion: string;
+  status: "idle" | "disabled" | "checking" | "available" | "not-available" | "downloading" | "downloaded" | "error";
+  latestVersion?: string;
+  percent?: number;
+  message?: string;
+  checkedAt?: string;
 };
 
 declare global {
@@ -27,6 +37,8 @@ declare global {
       startBridge: () => Promise<DesktopState>;
       stopBridge: () => Promise<DesktopState>;
       openConfigFolder: () => Promise<string>;
+      checkForUpdates: () => Promise<DesktopState>;
+      installUpdate: () => Promise<DesktopState>;
       onState: (callback: (state: DesktopState) => void) => () => void;
     };
   }

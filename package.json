@@ -1,6 +1,6 @@
 {
   "name": "codexproxy",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "private": true,
   "description": "A relay server, local Codex bridge, and mobile web console for controlling Codex through a server.",
   "main": "dist/src/desktop/main.js",
@@ -22,6 +22,7 @@
   },
   "dependencies": {
     "dotenv": "^16.4.7",
+    "electron-updater": "^6.8.3",
     "express": "^5.1.0",
     "nanoid": "^5.0.9",
     "ws": "^8.18.0",
@@ -65,8 +66,16 @@
     },
     "win": {
       "target": "nsis",
-      "artifactName": "${productName}-${version}-Setup.${ext}"
+      "artifactName": "Codex-Proxy-Bridge-${version}-Setup.${ext}"
     },
+    "publish": [
+      {
+        "provider": "github",
+        "owner": "2835968102",
+        "repo": "codexproxy",
+        "releaseType": "release"
+      }
+    ],
     "nsis": {
       "oneClick": false,
       "perMachine": false,

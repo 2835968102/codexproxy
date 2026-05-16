@@ -5,6 +5,8 @@ import {
   Circle,
   FolderCog,
   Play,
+  RefreshCw,
+  RotateCcw,
   Save,
   Server,
   Square,
@@ -25,6 +27,11 @@ const emptyState: DesktopState = {
     codexAppServerPort: 53179,
     codexAppServerUrl: "ws://127.0.0.1:53179",
     allowRawRpc: false
+  },
+  update: {
+    currentVersion: "0.1.0",
+    status: "idle",
+    message: "尚未检查更新。"
   },
   logs: []
 };
@@ -70,6 +77,15 @@ function App() {
     setState(next);
   }
 
+  async function checkForUpdates() {
+    const next = await window.codexProxyDesktop.checkForUpdates();
+    setState(next);
+  }
+
+  async function installUpdate() {
+    await window.codexProxyDesktop.installUpdate();
+  }
+
   function update<K extends keyof DesktopBridgeConfig>(key: K, value: DesktopBridgeConfig[K]) {
     setDraft((current) => ({ ...current, [key]: value }));
   }
@@ -108,6 +124,12 @@ function App() {
         <StatusTile label="Relay" value={relayOnline ? "已连接" : "未连接"} online={Boolean(relayOnline)} icon={<Server size={20} />} />
         <StatusTile label="Codex" value={codexOnline ? "已连接" : "未连接"} online={Boolean(codexOnline)} icon={<TerminalSquare size={20} />} />
         <StatusTile label="Session" value={sessionId} online={Boolean(state.status?.acceptedSessionId)} icon={<Circle size={20} />} />
+        <StatusTile
+          label="Update"
+          value={formatUpdateTile(state.update)}
+          online={state.update.status === "downloaded"}
+          icon={<Circle size={20} />}
+        />
       </section>
 
       <section className="content">
@@ -213,24 +235,56 @@ function App() {
           </label>
         </form>
 
-        <section className="panel logsPanel">
-          <div className="panelTitle">
-            <h2>日志</h2>
-            <span>{logs.length} 条</span>
-          </div>
-          <div className="logs">
-            {logs.length === 0 ? (
-              <div className="emptyLog">暂无日志</div>
-            ) : (
-              logs.map((log, index) => (
-                <div className={`logLine ${log.level}`} key={`${index}-${log.message}`}>
-                  <span>{log.level}</span>
-                  <p>{formatLog(log)}</p>
+        <div className="sideStack">
+          <section className="panel updatePanel">
+            <div className="panelTitle">
+              <h2>更新</h2>
+              <span>v{state.update.currentVersion}</span>
+            </div>
+            <div className="updateStatus">
+              <strong>{formatUpdateTitle(state.update)}</strong>
+              <p>{state.update.message || "尚未检查更新。"}</p>
+              {state.update.status === "downloading" && (
+                <div className="progressTrack" aria-label="更新下载进度">
+                  <div style={{ width: `${Math.round(state.update.percent || 0)}%` }} />
                 </div>
-              ))
-            )}
-          </div>
-        </section>
+              )}
+            </div>
+            <div className="updateActions">
+              <button
+                className="secondary"
+                onClick={checkForUpdates}
+                disabled={["checking", "downloading"].includes(state.update.status)}
+              >
+                <RefreshCw size={18} />
+                检查更新
+              </button>
+              <button className="primary" onClick={installUpdate} disabled={state.update.status !== "downloaded"}>
+                <RotateCcw size={18} />
+                重启安装
+              </button>
+            </div>
+          </section>
+
+          <section className="panel logsPanel">
+            <div className="panelTitle">
+              <h2>日志</h2>
+              <span>{logs.length} 条</span>
+            </div>
+            <div className="logs">
+              {logs.length === 0 ? (
+                <div className="emptyLog">暂无日志</div>
+              ) : (
+                logs.map((log, index) => (
+                  <div className={`logLine ${log.level}`} key={`${index}-${log.message}`}>
+                    <span>{log.level}</span>
+                    <p>{formatLog(log)}</p>
+                  </div>
+                ))
+              )}
+            </div>
+          </section>
+        </div>
       </section>
     </main>
   );
@@ -263,6 +317,49 @@ function formatLog(log: DesktopState["logs"][number]) {
     return log.message;
   }
   return `${log.message} ${JSON.stringify(log.data)}`;
+}
+
+function formatUpdateTile(update: DesktopState["update"]) {
+  if (update.status === "downloaded") {
+    return `v${update.latestVersion}`;
+  }
+  if (update.status === "downloading") {
+    return `${Math.round(update.percent || 0)}%`;
+  }
+  if (update.status === "checking") {
+    return "检查中";
+  }
+  if (update.status === "not-available") {
+    return "已是最新";
+  }
+  if (update.status === "disabled") {
+    return "开发模式";
+  }
+  if (update.status === "error") {
+    return "检查失败";
+  }
+  return "待检查";
+}
+
+function formatUpdateTitle(update: DesktopState["update"]) {
+  switch (update.status) {
+    case "checking":
+      return "正在检查";
+    case "available":
+      return "发现新版本";
+    case "downloading":
+      return "正在下载";
+    case "downloaded":
+      return "可以安装";
+    case "not-available":
+      return "无需更新";
+    case "disabled":
+      return "更新未启用";
+    case "error":
+      return "更新失败";
+    default:
+      return "自动更新";
+  }
 }
 
 createRoot(document.getElementById("root")!).render(<App />);

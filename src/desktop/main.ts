@@ -1,7 +1,9 @@
 import { app, BrowserWindow, ipcMain } from "electron";
+import { createRequire } from "node:module";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
+import type { AppUpdater, ProgressInfo, UpdateDownloadedEvent, UpdateInfo } from "electron-updater";
 import { BridgeRuntime, type BridgeRuntimeLog, type BridgeRuntimeStatus } from "../bridge/runtime.js";
 import { type BridgeConfig } from "../bridge/config.js";
 
@@ -20,16 +22,30 @@ type DesktopBridgeConfig = {
 type DesktopState = {
   running: boolean;
   config: DesktopBridgeConfig;
+  update: DesktopUpdateState;
   status?: BridgeRuntimeStatus;
   logs: BridgeRuntimeLog[];
 };
 
+type DesktopUpdateState = {
+  currentVersion: string;
+  status: "idle" | "disabled" | "checking" | "available" | "not-available" | "downloading" | "downloaded" | "error";
+  latestVersion?: string;
+  percent?: number;
+  message?: string;
+  checkedAt?: string;
+};
+
+const require = createRequire(import.meta.url);
+const { autoUpdater } = require("electron-updater") as { autoUpdater: AppUpdater };
 const maxLogs = 300;
 let mainWindow: BrowserWindow | undefined;
 let runtime: BridgeRuntime | undefined;
+let updateCheckPromise: Promise<DesktopUpdateState> | undefined;
 let state: DesktopState = {
   running: false,
   config: loadDesktopConfig(),
+  update: defaultUpdateState(),
   logs: []
 };
 
@@ -48,7 +64,9 @@ if (!gotLock) {
 
   app.whenReady().then(async () => {
     registerIpc();
+    registerAutoUpdater();
     await createWindow();
+    scheduleInitialUpdateCheck();
   });
 }
 
@@ -106,6 +124,13 @@ function registerIpc() {
   ipcMain.handle("desktop:openConfigFolder", () => {
     return import("electron").then(({ shell }) => shell.openPath(getConfigDir()));
   });
+  ipcMain.handle("desktop:checkForUpdates", () => {
+    return checkForUpdates(true);
+  });
+  ipcMain.handle("desktop:installUpdate", () => {
+    installDownloadedUpdate();
+    return state;
+  });
 }
 
 function startBridge() {
@@ -147,6 +172,171 @@ function pushLog(entry: BridgeRuntimeLog) {
 
 function publishState() {
   mainWindow?.webContents.send("desktop:state", state);
+}
+
+function registerAutoUpdater() {
+  autoUpdater.autoDownload = true;
+  autoUpdater.autoInstallOnAppQuit = true;
+  autoUpdater.on("checking-for-update", () => {
+    updateAutoUpdateState({
+      status: "checking",
+      message: "正在检查更新...",
+      percent: undefined
+    });
+  });
+  autoUpdater.on("update-available", (info: UpdateInfo) => {
+    pushLog({ level: "info", message: `Update ${info.version} is available. Downloading.` });
+    updateAutoUpdateState({
+      status: "available",
+      latestVersion: info.version,
+      message: `发现新版本 ${info.version}，正在下载。`,
+      percent: undefined
+    });
+  });
+  autoUpdater.on("download-progress", (progress: ProgressInfo) => {
+    updateAutoUpdateState({
+      status: "downloading",
+      percent: Math.max(0, Math.min(100, progress.percent)),
+      message: `正在下载更新 ${Math.round(progress.percent)}%。`
+    });
+  });
+  autoUpdater.on("update-downloaded", (info: UpdateDownloadedEvent) => {
+    pushLog({ level: "info", message: `Update ${info.version} downloaded.` });
+    updateAutoUpdateState({
+      status: "downloaded",
+      latestVersion: info.version,
+      percent: 100,
+      message: `新版本 ${info.version} 已下载，重启后安装。`,
+      checkedAt: new Date().toISOString()
+    });
+  });
+  autoUpdater.on("update-not-available", (info: UpdateInfo) => {
+    updateAutoUpdateState({
+      status: "not-available",
+      latestVersion: info.version,
+      percent: undefined,
+      message: "当前已经是最新版本。",
+      checkedAt: new Date().toISOString()
+    });
+  });
+  autoUpdater.on("error", (error: Error) => {
+    if (isNoPublishedVersionsError(error)) {
+      updateAutoUpdateState(noPublishedVersionsUpdateState());
+      return;
+    }
+
+    pushLog({ level: "warn", message: `Update check failed: ${error.message}` });
+    updateAutoUpdateState({
+      status: "error",
+      percent: undefined,
+      message: `更新检查失败：${error.message}`,
+      checkedAt: new Date().toISOString()
+    });
+  });
+}
+
+function scheduleInitialUpdateCheck() {
+  if (!app.isPackaged) {
+    updateAutoUpdateState({
+      status: "disabled",
+      message: "开发模式下不会自动检查更新。"
+    });
+    return;
+  }
+
+  setTimeout(() => {
+    void checkForUpdates(false);
+  }, 2500);
+}
+
+function checkForUpdates(manual: boolean) {
+  if (!app.isPackaged) {
+    updateAutoUpdateState({
+      status: "disabled",
+      message: manual ? "开发模式下不能检查线上更新，请安装打包后的版本测试。" : "开发模式下不会自动检查更新。",
+      checkedAt: new Date().toISOString()
+    });
+    return Promise.resolve(state);
+  }
+
+  if (state.update.status === "downloaded") {
+    return Promise.resolve(state);
+  }
+
+  if (updateCheckPromise) {
+    return updateCheckPromise.then(() => state);
+  }
+
+  updateAutoUpdateState({
+    status: "checking",
+    percent: undefined,
+    message: manual ? "正在手动检查更新..." : "正在自动检查更新..."
+  });
+
+  updateCheckPromise = autoUpdater
+    .checkForUpdates()
+    .then((result) => {
+      if (!result) {
+        updateAutoUpdateState({
+          status: "disabled",
+          message: "当前安装包没有可用的更新配置。",
+          checkedAt: new Date().toISOString()
+        });
+      }
+      return state.update;
+    })
+    .catch((error: unknown) => {
+      if (isNoPublishedVersionsError(error)) {
+        updateAutoUpdateState(noPublishedVersionsUpdateState());
+        return state.update;
+      }
+
+      const message = error instanceof Error ? error.message : "未知更新错误";
+      updateAutoUpdateState({
+        status: "error",
+        message: `更新检查失败：${message}`,
+        checkedAt: new Date().toISOString()
+      });
+      return state.update;
+    })
+    .finally(() => {
+      updateCheckPromise = undefined;
+    });
+
+  return updateCheckPromise.then(() => state);
+}
+
+function isNoPublishedVersionsError(error: unknown) {
+  return error instanceof Error && error.message.includes("No published versions on GitHub");
+}
+
+function noPublishedVersionsUpdateState(): Partial<DesktopUpdateState> {
+  return {
+    status: "not-available",
+    latestVersion: app.getVersion(),
+    percent: undefined,
+    message: "GitHub Release 里还没有发布版本；首次发布后才能自动更新。",
+    checkedAt: new Date().toISOString()
+  };
+}
+
+function installDownloadedUpdate() {
+  if (state.update.status !== "downloaded") {
+    return;
+  }
+
+  pushLog({ level: "info", message: "Installing downloaded update." });
+  stopBridge();
+  autoUpdater.quitAndInstall(true, true);
+}
+
+function updateAutoUpdateState(update: Partial<DesktopUpdateState>) {
+  state.update = {
+    ...state.update,
+    ...update,
+    currentVersion: app.getVersion()
+  };
+  publishState();
 }
 
 function toBridgeConfig(config: DesktopBridgeConfig): BridgeConfig {
@@ -209,6 +399,14 @@ function defaultDesktopConfig(): DesktopBridgeConfig {
     codexAppServerPort: 53179,
     codexAppServerUrl: "ws://127.0.0.1:53179",
     allowRawRpc: false
+  };
+}
+
+function defaultUpdateState(): DesktopUpdateState {
+  return {
+    currentVersion: app.getVersion(),
+    status: "idle",
+    message: "尚未检查更新。"
   };
 }
 

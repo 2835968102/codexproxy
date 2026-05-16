@@ -94,7 +94,7 @@ button:disabled {
 
 .statusGrid {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(5, minmax(0, 1fr));
   gap: 12px;
   margin-bottom: 18px;
 }
@@ -218,15 +218,58 @@ input:disabled {
 }
 
 .logsPanel {
-  min-height: 560px;
+  min-height: 424px;
 }
 
 .logs {
-  height: 500px;
+  height: 364px;
   overflow: auto;
   background: #171a16;
   border-radius: 8px;
   padding: 12px;
+}
+
+.sideStack {
+  display: grid;
+  gap: 18px;
+}
+
+.updatePanel {
+  min-height: 118px;
+}
+
+.updateStatus {
+  display: grid;
+  gap: 8px;
+}
+
+.updateStatus strong {
+  font-size: 16px;
+}
+
+.updateStatus p {
+  color: #4d544b;
+  line-height: 1.45;
+}
+
+.progressTrack {
+  height: 8px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: #eef0ea;
+}
+
+.progressTrack div {
+  height: 100%;
+  border-radius: inherit;
+  background: #1f7a52;
+  transition: width 180ms ease;
+}
+
+.updateActions {
+  display: flex;
+  gap: 10px;
+  margin-top: 14px;
 }
 
 .emptyLog {
@@ -277,7 +320,12 @@ input:disabled {
     width: 100%;
   }
 
-  .actions button:not(.iconButton) {
+  .actions button:not(.iconButton),
+  .updateActions button {
     flex: 1;
+  }
+
+  .updateActions {
+    flex-direction: column;
   }
 }

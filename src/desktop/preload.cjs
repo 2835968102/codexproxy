@@ -6,6 +6,8 @@ contextBridge.exposeInMainWorld("codexProxyDesktop", {
   startBridge: () => ipcRenderer.invoke("desktop:startBridge"),
   stopBridge: () => ipcRenderer.invoke("desktop:stopBridge"),
   openConfigFolder: () => ipcRenderer.invoke("desktop:openConfigFolder"),
+  checkForUpdates: () => ipcRenderer.invoke("desktop:checkForUpdates"),
+  installUpdate: () => ipcRenderer.invoke("desktop:installUpdate"),
   onState: (callback) => {
     const handler = (_event, state) => callback(state);
     ipcRenderer.on("desktop:state", handler);

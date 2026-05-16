@@ -129,6 +129,8 @@ Install and open **Codex Proxy Bridge**, then fill:
 
 Press **Save**, then **Start**. The status tiles should show Bridge running, Relay connected, and Codex connected.
 
+The desktop app checks for updates automatically after startup. You can also press **Check updates** in the update panel. When a new version is downloaded, press **Restart to install**; the app stops the bridge, restarts, and lets the installer replace the old version.
+
 If Codex is installed somewhere else, update **Codex Path**. If the `codex` command already works in PowerShell, keep it as `codex`.
 
 For development, you can run the desktop app without packaging:
@@ -136,6 +138,10 @@ For development, you can run the desktop app without packaging:
 ```powershell
 npm run start:desktop
 ```
+
+Development builds do not check online updates. Build and install the NSIS package from `release\` to test auto-update behavior.
+
+To publish a Windows desktop update, bump `package.json` `version`, commit it, then push a matching tag such as `v0.1.1`. The `Windows desktop release` GitHub Action builds the installer, uploads `latest.yml`, the `.exe`, and the `.blockmap` to the GitHub Release. Installed desktop apps read that release metadata through `electron-updater`.
 
 The old CLI bridge still exists for debugging:
 
