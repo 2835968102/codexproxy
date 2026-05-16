@@ -2,7 +2,7 @@ FROM node:22-alpine AS deps
 WORKDIR /app
 ENV ELECTRON_SKIP_BINARY_DOWNLOAD=1
 COPY package.json package-lock.json ./
-RUN npm ci --omit=optional
+RUN npm ci
 
 FROM deps AS build
 COPY tsconfig.json vite.config.ts vitest.config.ts ./
