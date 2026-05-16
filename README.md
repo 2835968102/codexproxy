@@ -31,10 +31,11 @@ There are two config file formats:
 | Used by | File | Format |
 | --- | --- | --- |
 | Linux relay | `~/codexproxy/.env` | `KEY=value` env file |
-| Windows bridge | `codexproxy.local.json` | JSON |
+| Windows desktop bridge | `%APPDATA%\Codex Proxy Bridge\bridge-config.json` | Managed by the desktop app |
 | Linux bridge container | `~/codexproxy-bridge/.env` | `KEY=value` env file |
+| Windows CLI bridge, development only | `codexproxy.local.json` | JSON |
 
-Do not put the JSON config into `.env`. The relay `.env` must look like `deploy/env.example`; the Linux bridge `.env` must look like `deploy/bridge.env.example`; the Windows JSON config must look like `codexproxy.local.example.json`.
+Do not put the JSON config into `.env`. The relay `.env` must look like `deploy/env.example`; the Linux bridge `.env` must look like `deploy/bridge.env.example`; the Windows desktop bridge writes its own config from the app UI.
 
 ## Linux Relay Deployment
 
@@ -102,18 +103,47 @@ If you use HTTPS with Caddy or Nginx, proxy `/` and `/ws` to `127.0.0.1:8787`, s
 
 ## Windows Bridge Deployment
 
-Use this on the Windows computer that runs Codex. This mode can auto-start `codex app-server` because the bridge process runs directly on the same Windows host as Codex.
+Use this on the Windows computer that runs Codex. The Windows bridge is now a desktop app that can save config, start/stop the bridge, auto-start local `codex app-server`, and show connection logs.
 
-Clone and install:
+Build the installer from the repo:
 
 ```powershell
 git clone https://github.com/2835968102/codexproxy.git
 cd codexproxy
 npm install
-npm run build
+npm run package:windows
 ```
 
-Create local config:
+The installer is written to `release\Codex Proxy Bridge-0.1.0-Setup.exe`.
+
+Install and open **Codex Proxy Bridge**, then fill:
+
+| Field | Value |
+| --- | --- |
+| Relay URL | `ws://your-server-ip:8787/ws` |
+| Relay Token | Same value as `RELAY_TOKEN` in the Linux relay `.env` |
+| Session ID | For example `desktop-codex` |
+| Device Name | For example `Windows Codex Bridge` |
+| Codex Path | `codex`, or the full path to `codex.exe` |
+| Auto-start app-server | On |
+
+Press **Save**, then **Start**. The status tiles should show Bridge running, Relay connected, and Codex connected.
+
+If Codex is installed somewhere else, update **Codex Path**. If the `codex` command already works in PowerShell, keep it as `codex`.
+
+For development, you can run the desktop app without packaging:
+
+```powershell
+npm run start:desktop
+```
+
+The old CLI bridge still exists for debugging:
+
+```powershell
+npm run start:bridge
+```
+
+CLI mode reads `codexproxy.local.json`. Create it with:
 
 ```powershell
 Copy-Item codexproxy.local.example.json codexproxy.local.json
@@ -141,12 +171,6 @@ Replace `<you>` with your Windows user name, or leave `codexBin` empty if the `c
 `bridge.relayToken` must be the same value as `RELAY_TOKEN` in the Linux relay `.env`.
 
 `bridge.sessionId` is optional but recommended. It gives this bridge a stable ID, so the phone can reconnect to the same bridge after refresh or relay restart. Use a different `sessionId` for every bridge, for example `desktop-codex` and `linux-codex`.
-
-Start the bridge:
-
-```powershell
-npm run start:bridge
-```
 
 Expected result:
 

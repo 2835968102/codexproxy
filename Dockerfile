@@ -1,7 +1,8 @@
 FROM node:22-alpine AS deps
 WORKDIR /app
+ENV ELECTRON_SKIP_BINARY_DOWNLOAD=1
 COPY package.json package-lock.json ./
-RUN npm ci
+RUN npm ci --omit=optional
 
 FROM deps AS build
 COPY tsconfig.json vite.config.ts vitest.config.ts ./
@@ -12,7 +13,7 @@ FROM node:22-alpine AS relay
 WORKDIR /app
 ENV NODE_ENV=production
 COPY package.json package-lock.json ./
-RUN npm ci --omit=dev && npm cache clean --force
+RUN npm ci --omit=dev --omit=optional && npm cache clean --force
 COPY --from=build /app/dist ./dist
 EXPOSE 8787
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
@@ -25,7 +26,7 @@ ENV NODE_ENV=production \
   CODEX_AUTO_START_APP_SERVER=false \
   CODEX_APP_SERVER_URL=ws://127.0.0.1:53179
 COPY package.json package-lock.json ./
-RUN npm ci --omit=dev \
+RUN npm ci --omit=dev --omit=optional \
   && npm cache clean --force \
   && chown -R node:node /app
 COPY --from=build --chown=node:node /app/dist ./dist

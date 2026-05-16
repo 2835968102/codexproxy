@@ -1,0 +1,13 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "types": ["node", "electron"]
+  },
+  "include": [
+    "src/bridge/**/*.ts",
+    "src/shared/**/*.ts",
+    "src/desktop/**/*.ts",
+    "src/desktop/**/*.tsx",
+    "vite.desktop.config.ts"
+  ]
+}

@@ -19,6 +19,7 @@ export class CodexAppServerClient {
   private readonly pending = new Map<string | number, PendingRequest>();
   private readonly threadMetadata = new Map<string, { cwd?: string }>();
   private status: CodexTargetStatus = { connected: false };
+  private stopped = false;
 
   constructor(
     private readonly options: {
@@ -33,6 +34,7 @@ export class CodexAppServerClient {
   ) {}
 
   async start() {
+    this.stopped = false;
     if (this.options.autoStart) {
       this.startLocalAppServer();
     }
@@ -41,8 +43,14 @@ export class CodexAppServerClient {
   }
 
   stop() {
+    this.stopped = true;
+    this.ws?.removeAllListeners();
     this.ws?.close();
+    this.ws = undefined;
     this.appServerProcess?.kill();
+    this.appServerProcess = undefined;
+    this.rejectAllPending(new Error("Codex app-server stopped."));
+    this.setStatus({ connected: false });
   }
 
   getStatus() {
@@ -159,11 +167,14 @@ export class CodexAppServerClient {
 
   private async connectWithRetry() {
     let delay = 500;
-    for (;;) {
+    while (!this.stopped) {
       try {
         await this.connect();
         return;
       } catch (error) {
+        if (this.stopped) {
+          return;
+        }
         this.setStatus({
           connected: false,
           lastError: error instanceof Error ? error.message : "Failed to connect to Codex app-server."
@@ -176,6 +187,11 @@ export class CodexAppServerClient {
 
   private connect(): Promise<void> {
     return new Promise((resolve, reject) => {
+      if (this.stopped) {
+        resolve();
+        return;
+      }
+
       const ws = new WebSocket(this.options.url);
       let settled = false;
 
@@ -190,11 +206,17 @@ export class CodexAppServerClient {
         this.ws = ws;
         ws.on("message", (raw) => this.handleMessage(raw.toString()));
         ws.on("close", () => {
+          if (this.stopped) {
+            return;
+          }
           this.setStatus({ connected: false, lastError: "Codex app-server connection closed." });
           this.rejectAllPending(new Error("Codex app-server connection closed."));
           void this.connectWithRetry();
         });
         ws.on("error", () => {
+          if (this.stopped) {
+            return;
+          }
           this.setStatus({ connected: false, lastError: "Codex app-server websocket error." });
         });
 
