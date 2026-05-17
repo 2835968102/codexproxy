@@ -280,7 +280,7 @@ export const litePageHtml = String.raw`<!doctype html>
         white-space: nowrap;
       }
       .work-panel {
-        display: grid;
+        display: none;
         gap: 10px;
         margin: 10px 14px 0;
         padding: 10px 12px;
@@ -328,7 +328,7 @@ export const litePageHtml = String.raw`<!doctype html>
         white-space: pre-wrap;
       }
       .activity-list {
-        display: grid;
+        display: none;
         gap: 8px;
         max-height: 220px;
         overflow-y: auto;
@@ -624,22 +624,6 @@ export const litePageHtml = String.raw`<!doctype html>
           <div id="chatSubtitle" class="chat-subtitle">选择历史对话会自动加载聊天记录。</div>
         </div>
 
-        <div id="workPanel" class="work-panel idle">
-          <div class="work-status">
-            <span class="work-dot"></span>
-            <div>
-              <div id="workLabel" class="work-label">空闲</div>
-              <div id="workDetail" class="work-detail">发送消息后会显示 Codex 的实时状态。</div>
-            </div>
-          </div>
-          <div id="activityList" class="activity-list">
-            <div class="activity-item empty">
-              <span class="activity-title">暂无活动</span>
-              <div class="work-detail">发送消息后，这里会显示思考、计划、工具调用和审批状态。</div>
-            </div>
-          </div>
-        </div>
-
         <div id="chatLog" class="chat-log">
           <div class="empty-state">连接后选择一个对话，或输入消息新建对话。</div>
         </div>
@@ -679,7 +663,6 @@ export const litePageHtml = String.raw`<!doctype html>
         var historyLoadSeq = 0;
         var threadListRefreshTimer = null;
         var workspaceOpenByKey = readWorkspaceOpenState();
-        var activities = [];
 
         var pairingInput = document.getElementById("pairingCode");
         var sessionInput = document.getElementById("sessionId");
@@ -696,10 +679,6 @@ export const litePageHtml = String.raw`<!doctype html>
         var cwdEl = document.getElementById("cwd");
         var chatTitle = document.getElementById("chatTitle");
         var chatSubtitle = document.getElementById("chatSubtitle");
-        var workPanel = document.getElementById("workPanel");
-        var workLabel = document.getElementById("workLabel");
-        var workDetail = document.getElementById("workDetail");
-        var activityList = document.getElementById("activityList");
         var bottomStatus = document.getElementById("bottomStatus");
         var bottomStatusTitle = document.getElementById("bottomStatusTitle");
         var bottomStatusDetail = document.getElementById("bottomStatusDetail");
@@ -726,90 +705,14 @@ export const litePageHtml = String.raw`<!doctype html>
         }
 
         function setWork(phase, label, detail) {
-          workPanel.className = "work-panel " + (phase || "idle");
-          workLabel.textContent = label || "空闲";
-          workDetail.textContent = detail || "";
           updateBottomStatus(phase, label, detail);
         }
 
-        function resetActivities() {
-          activities = [];
-          renderActivities();
-        }
+        function resetActivities() {}
 
-        function upsertActivity(item) {
-          item.ts = Date.now();
-          var found = false;
-          for (var i = 0; i < activities.length; i++) {
-            if (activities[i].id === item.id) {
-              activities[i] = Object.assign({}, activities[i], item);
-              found = true;
-              break;
-            }
-          }
-          if (!found) {
-            activities.unshift(item);
-          }
-          activities = activities.slice(0, 60);
-          renderActivities();
-        }
+        function upsertActivity() {}
 
-        function appendActivityDetail(id, seed, detail) {
-          if (!detail) return;
-          var existing = null;
-          for (var i = 0; i < activities.length; i++) {
-            if (activities[i].id === id) {
-              existing = activities[i];
-              break;
-            }
-          }
-          var nextDetail = shorten([existing && existing.detail, detail].filter(Boolean).join("\n"), 1800);
-          upsertActivity(Object.assign({}, seed, { id: id, detail: nextDetail }));
-        }
-
-        function renderActivities() {
-          activityList.innerHTML = "";
-          if (!activities.length) {
-            var empty = document.createElement("div");
-            empty.className = "activity-item empty";
-            var title = document.createElement("span");
-            title.className = "activity-title";
-            title.textContent = "暂无活动";
-            var detail = document.createElement("div");
-            detail.className = "work-detail";
-            detail.textContent = "发送消息后，这里会显示思考、计划、工具调用和审批状态。";
-            empty.appendChild(title);
-            empty.appendChild(detail);
-            activityList.appendChild(empty);
-            return;
-          }
-
-          for (var i = 0; i < activities.length; i++) {
-            var item = activities[i];
-            var node = document.createElement("div");
-            node.className = "activity-item " + (item.state || "running");
-            var head = document.createElement("div");
-            head.className = "activity-head";
-            var kind = document.createElement("span");
-            kind.textContent = item.kind || "活动";
-            var time = document.createElement("time");
-            time.textContent = new Date(item.ts).toLocaleTimeString();
-            head.appendChild(kind);
-            head.appendChild(time);
-            var title = document.createElement("span");
-            title.className = "activity-title";
-            title.textContent = item.title || "";
-            node.appendChild(head);
-            node.appendChild(title);
-            if (item.detail) {
-              var detail = document.createElement("div");
-              detail.className = "activity-detail";
-              detail.textContent = item.detail;
-              node.appendChild(detail);
-            }
-            activityList.appendChild(node);
-          }
-        }
+        function appendActivityDetail() {}
 
         function envelope(type, payload, requestId) {
           return JSON.stringify({
