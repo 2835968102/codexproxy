@@ -475,6 +475,9 @@ export const litePageHtml = String.raw`<!doctype html>
         var currentThreadCwd = "";
         var bubbleByItemId = {};
         var lastAssistantBubble = null;
+        var activeAssistantItemId = "";
+        var historyLoadSeq = 0;
+        var threadListRefreshTimer = null;
         var workspaceOpenByKey = readWorkspaceOpenState();
 
         var pairingInput = document.getElementById("pairingCode");
@@ -644,9 +647,12 @@ export const litePageHtml = String.raw`<!doctype html>
           }, id));
         }
 
-        function refreshThreads(preferredThreadId) {
+        function refreshThreads(preferredThreadId, options) {
+          options = options || {};
+          var loadHistory = options.loadHistory !== false;
+          var showStatus = options.showStatus !== false;
           var wanted = preferredThreadId || currentThreadId;
-          show(actionMsg, "正在刷新对话...");
+          if (showStatus) show(actionMsg, "正在刷新对话...");
           rpc("thread.list", {
             limit: 80,
             archived: false,
@@ -665,16 +671,29 @@ export const litePageHtml = String.raw`<!doctype html>
               }
             }
             renderWorkspaces();
-            show(actionMsg, "已按工作目录分组 " + threads.length + " 个对话。");
+            if (showStatus) show(actionMsg, "已按工作目录分组 " + threads.length + " 个对话。");
 
             if (wanted && threadsById[wanted]) {
-              selectThread(wanted, true);
+              selectThread(wanted, loadHistory);
             } else if (!currentThreadId && threads[0] && threads[0].id) {
-              selectThread(threads[0].id, true);
-            } else if (currentThreadId && !threadsById[currentThreadId]) {
+              selectThread(threads[0].id, loadHistory);
+            } else if (loadHistory && currentThreadId && !threadsById[currentThreadId]) {
               startNewThread(false);
             }
           });
+        }
+
+        function scheduleThreadListRefresh(threadId) {
+          if (threadListRefreshTimer) {
+            clearTimeout(threadListRefreshTimer);
+          }
+          threadListRefreshTimer = setTimeout(function () {
+            threadListRefreshTimer = null;
+            refreshThreads(threadId || currentThreadId, {
+              loadHistory: false,
+              showStatus: false
+            });
+          }, 400);
         }
 
         function renderWorkspaces() {
@@ -778,13 +797,15 @@ export const litePageHtml = String.raw`<!doctype html>
         function selectThread(threadId, loadHistory) {
           var thread = threadsById[threadId];
           if (!thread) return;
+          var changedThread = currentThreadId !== threadId;
 
           currentThreadId = threadId;
           currentThreadCwd = thread.cwd || "";
           localStorage.setItem("threadId", threadId);
           cwdEl.value = currentThreadCwd;
-          bubbleByItemId = {};
-          lastAssistantBubble = null;
+          if (loadHistory || changedThread) {
+            resetBubbleTracking();
+          }
           updateChatHeader(thread);
           renderWorkspaces();
 
@@ -797,8 +818,8 @@ export const litePageHtml = String.raw`<!doctype html>
           currentThreadId = "";
           currentThreadCwd = trim(cwdEl.value);
           localStorage.removeItem("threadId");
-          bubbleByItemId = {};
-          lastAssistantBubble = null;
+          historyLoadSeq++;
+          resetBubbleTracking();
           updateChatHeader(null);
           renderWorkspaces();
           renderEmpty("正在新建对话。第一条消息会使用当前工作目录。");
@@ -816,9 +837,11 @@ export const litePageHtml = String.raw`<!doctype html>
         }
 
         function loadThreadHistory(threadId) {
+          var loadId = ++historyLoadSeq;
           renderEmpty("正在加载历史记录...");
           show(actionMsg, "正在加载对话历史...");
           rpc("thread.read", { threadId: threadId, includeTurns: true }, function (res) {
+            if (!isCurrentHistoryLoad(threadId, loadId)) return;
             if (!res || !res.ok) {
               show(actionMsg, (res && res.error) || "历史加载失败");
               renderEmpty("历史加载失败。可以刷新后再试。");
@@ -834,16 +857,17 @@ export const litePageHtml = String.raw`<!doctype html>
               return;
             }
 
-            loadThreadTurnsFallback(threadId, thread);
+            loadThreadTurnsFallback(threadId, thread, loadId);
           });
         }
 
-        function loadThreadTurnsFallback(threadId, thread) {
+        function loadThreadTurnsFallback(threadId, thread, loadId) {
           rpc("thread.turns.list", {
             threadId: threadId,
             limit: 100,
             sortDirection: "asc"
           }, function (res) {
+            if (!isCurrentHistoryLoad(threadId, loadId)) return;
             if (!res || !res.ok) {
               renderHistory(thread, []);
               show(actionMsg, "已加载线程信息，但没有可显示的历史明细。");
@@ -855,14 +879,41 @@ export const litePageHtml = String.raw`<!doctype html>
           });
         }
 
-        function renderHistory(thread, turns) {
+        function isCurrentHistoryLoad(threadId, loadId) {
+          return loadId === historyLoadSeq && threadId === currentThreadId;
+        }
+
+        function resetBubbleTracking() {
           bubbleByItemId = {};
           lastAssistantBubble = null;
+          activeAssistantItemId = "";
+        }
+
+        function orderedItemsForTurn(turn) {
+          var items = Array.isArray(turn && turn.items) ? turn.items : [];
+          return items
+            .map(function (item, index) {
+              return {
+                item: item,
+                index: index,
+                rank: item && item.type === "userMessage" ? 0 : 1
+              };
+            })
+            .sort(function (a, b) {
+              return a.rank - b.rank || a.index - b.index;
+            })
+            .map(function (entry) {
+              return entry.item;
+            });
+        }
+
+        function renderHistory(thread, turns) {
+          resetBubbleTracking();
           chatLog.innerHTML = "";
           var orderedTurns = turns.slice().sort(compareTurns);
           var count = 0;
           for (var i = 0; i < orderedTurns.length; i++) {
-            var items = Array.isArray(orderedTurns[i].items) ? orderedTurns[i].items : [];
+            var items = orderedItemsForTurn(orderedTurns[i]);
             for (var j = 0; j < items.length; j++) {
               var rendered = renderHistoryItem(items[j], orderedTurns[i]);
               if (rendered) count++;
@@ -911,6 +962,9 @@ export const litePageHtml = String.raw`<!doctype html>
           }
 
           sendBtn.disabled = true;
+          historyLoadSeq++;
+          activeAssistantItemId = "";
+          lastAssistantBubble = null;
           addBubble("user", prompt);
           promptEl.value = "";
           autoSizePrompt();
@@ -946,7 +1000,7 @@ export const litePageHtml = String.raw`<!doctype html>
             localStorage.setItem("threadId", threadId);
           }
           show(actionMsg, "已发送，等待 Codex 回复。");
-          refreshThreads(threadId);
+          scheduleThreadListRefresh(threadId);
         }
 
         function handleCodexEvent(message) {
@@ -954,6 +1008,13 @@ export const litePageHtml = String.raw`<!doctype html>
 
           var params = message.params || {};
           if (params.threadId && currentThreadId && params.threadId !== currentThreadId) {
+            return;
+          }
+
+          if (message.method === "thread/started" && params.thread && params.thread.id && !currentThreadId) {
+            currentThreadId = params.thread.id;
+            localStorage.setItem("threadId", currentThreadId);
+            updateChatHeader(params.thread);
             return;
           }
 
@@ -965,20 +1026,29 @@ export const litePageHtml = String.raw`<!doctype html>
           if (message.method === "item/completed") {
             var item = params.item;
             if (item && item.type === "agentMessage" && item.text) {
-              setAssistantText(item.id || "completed-" + Date.now(), item.text);
+              setAssistantText(
+                item.id || params.itemId || "completed-" + Date.now(),
+                item.text,
+                params.itemId || params.turnId || activeAssistantItemId
+              );
             }
             return;
           }
 
           if (message.method === "turn/started") {
+            if (params.threadId && !currentThreadId) {
+              currentThreadId = params.threadId;
+              localStorage.setItem("threadId", currentThreadId);
+            }
             lastAssistantBubble = null;
+            activeAssistantItemId = "";
             show(actionMsg, "Codex 正在回复...");
             return;
           }
 
           if (message.method === "turn/completed") {
             show(actionMsg, "Codex 已完成回复。");
-            if (currentThreadId) refreshThreads(currentThreadId);
+            if (currentThreadId) scheduleThreadListRefresh(currentThreadId);
           }
         }
 
@@ -1023,12 +1093,13 @@ export const litePageHtml = String.raw`<!doctype html>
         }
 
         function ensureAssistantNode(itemId) {
+          itemId = itemId || "active";
           if (bubbleByItemId[itemId]) {
             return bubbleByItemId[itemId];
           }
-          var node = lastAssistantBubble || addBubble("assistant", "");
-          bubbleByItemId[itemId] = node;
+          var node = addBubble("assistant", "", null, itemId);
           lastAssistantBubble = node;
+          activeAssistantItemId = itemId;
           return node;
         }
 
@@ -1039,9 +1110,13 @@ export const litePageHtml = String.raw`<!doctype html>
           scrollChat();
         }
 
-        function setAssistantText(itemId, text) {
+        function setAssistantText(itemId, text, fallbackItemId) {
+          if (!bubbleByItemId[itemId] && fallbackItemId && bubbleByItemId[fallbackItemId]) {
+            bubbleByItemId[itemId] = bubbleByItemId[fallbackItemId];
+          }
           var node = ensureAssistantNode(itemId);
           node.textContent = text || "";
+          activeAssistantItemId = itemId;
           scrollChat();
         }
 

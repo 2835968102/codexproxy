@@ -41,6 +41,7 @@ function App() {
   const socketRef = useRef<WebSocket | undefined>(undefined);
   const pendingRef = useRef(new Map<string, Pending>());
   const currentTurnByThread = useRef(new Map<string, string>());
+  const activeReplyIdRef = useRef<string | undefined>(undefined);
   const retryingWithoutSessionRef = useRef(false);
 
   const activeThread = useMemo(
@@ -202,6 +203,7 @@ function App() {
     const msg = message as any;
     if (msg?.method === "turn/started" && msg.params?.threadId && msg.params?.turn?.id) {
       currentTurnByThread.current.set(msg.params.threadId, msg.params.turn.id);
+      activeReplyIdRef.current = undefined;
     }
     if (msg?.method === "turn/completed" && msg.params?.threadId) {
       currentTurnByThread.current.delete(msg.params.threadId);
@@ -210,6 +212,10 @@ function App() {
 
   function updateReplies(message: unknown) {
     const msg = message as any;
+    if (msg?.params?.threadId && currentThreadId && msg.params.threadId !== currentThreadId) {
+      return;
+    }
+
     if (msg?.method === "item/agentMessage/delta") {
       const params = msg.params ?? {};
       const itemId = params.itemId || params.turnId || "active";
@@ -217,6 +223,7 @@ function App() {
       if (!delta) {
         return;
       }
+      activeReplyIdRef.current = itemId;
       setReplies((items) => {
         const existing = items.find((item) => item.id === itemId);
         if (existing) {
@@ -224,18 +231,24 @@ function App() {
             item.id === itemId ? { ...item, body: String(item.body ?? "") + delta } : item
           );
         }
-        return [{ id: itemId, ts: Date.now(), kind: "Codex", body: delta }, ...items].slice(0, 20);
+        return [...items, { id: itemId, ts: Date.now(), kind: "Codex", body: delta }].slice(-40);
       });
     }
 
     if (msg?.method === "item/completed" && msg.params?.item?.type === "agentMessage") {
       const item = msg.params.item;
       setReplies((items) => {
-        const existing = items.find((reply) => reply.id === item.id);
+        const existing =
+          items.find((reply) => reply.id === item.id) ??
+          (activeReplyIdRef.current ? items.find((reply) => reply.id === activeReplyIdRef.current) : undefined);
         if (existing) {
-          return items.map((reply) => (reply.id === item.id ? { ...reply, body: item.text } : reply));
+          activeReplyIdRef.current = item.id;
+          return items.map((reply) =>
+            reply.id === existing.id ? { ...reply, id: item.id, body: item.text } : reply
+          );
         }
-        return [{ id: item.id, ts: Date.now(), kind: "Codex", body: item.text }, ...items].slice(0, 20);
+        activeReplyIdRef.current = item.id;
+        return [...items, { id: item.id, ts: Date.now(), kind: "Codex", body: item.text }].slice(-40);
       });
     }
   }
@@ -277,7 +290,7 @@ function App() {
     });
   }
 
-  async function refreshThreads() {
+  async function refreshThreads(preferredThreadId = currentThreadId) {
     try {
       const response = await rpc("thread.list", { limit: 25, archived: false });
       if (!response.ok) {
@@ -287,7 +300,9 @@ function App() {
       const result = response.result as any;
       const list = result?.threads ?? result?.items ?? result?.data ?? result ?? [];
       setThreads(Array.isArray(list) ? list : []);
-      if (!currentThreadId && Array.isArray(list) && list[0]?.id) {
+      if (preferredThreadId) {
+        setCurrentThreadId(preferredThreadId);
+      } else if (Array.isArray(list) && list[0]?.id) {
         setCurrentThreadId(list[0].id);
       }
     } catch (error) {
@@ -301,13 +316,21 @@ function App() {
       return;
     }
 
+    const submittedPrompt = prompt.trim();
+    const userReplyId = `user-${Date.now()}-${crypto.randomUUID()}`;
     setBusy(true);
+    setPrompt("");
+    activeReplyIdRef.current = undefined;
+    setReplies((items) =>
+      [...items, { id: userReplyId, ts: Date.now(), kind: "你", body: submittedPrompt }].slice(-40)
+    );
     try {
+      let sentThreadId = currentThreadId;
       if (currentThreadId) {
         const selectedThread = threads.find((thread) => thread.id === currentThreadId);
         const response = await rpc("turn.start", {
           threadId: currentThreadId,
-          prompt,
+          prompt: submittedPrompt,
           cwd: selectedThread?.cwd
         });
         if (!response.ok) {
@@ -315,7 +338,7 @@ function App() {
         }
       } else {
         const response = await rpc("thread.start", {
-          prompt,
+          prompt: submittedPrompt,
           cwd: cwd.trim() || undefined
         });
         if (!response.ok) {
@@ -323,12 +346,12 @@ function App() {
         }
         const threadId = (response.result as any)?.thread?.id;
         if (threadId) {
+          sentThreadId = threadId;
           setCurrentThreadId(threadId);
         }
       }
 
-      setPrompt("");
-      await refreshThreads();
+      await refreshThreads(sentThreadId);
     } catch (error) {
       addLog("error", error instanceof Error ? error.message : error);
     } finally {
@@ -437,7 +460,7 @@ function App() {
             <aside className="panel threads">
               <div className="panel-head">
                 <h2>线程</h2>
-                <button type="button" onClick={refreshThreads}>
+                <button type="button" onClick={() => refreshThreads()}>
                   刷新
                 </button>
               </div>
@@ -499,7 +522,7 @@ function App() {
 
           <section className="panel events">
             <div className="panel-head">
-              <h2>Codex 回复</h2>
+              <h2>对话</h2>
               <button type="button" onClick={() => setReplies([])}>
                 清空
               </button>
