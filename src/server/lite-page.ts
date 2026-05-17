@@ -279,6 +279,110 @@ export const litePageHtml = String.raw`<!doctype html>
         text-overflow: ellipsis;
         white-space: nowrap;
       }
+      .work-panel {
+        display: grid;
+        gap: 10px;
+        margin: 10px 14px 0;
+        padding: 10px 12px;
+        border: 1px solid #dedbd2;
+        border-radius: 10px;
+        background: #fff;
+      }
+      .work-status {
+        display: grid;
+        grid-template-columns: 12px 1fr;
+        gap: 10px;
+        align-items: start;
+      }
+      .work-dot {
+        width: 10px;
+        height: 10px;
+        margin-top: 5px;
+        border-radius: 999px;
+        background: #9a948a;
+      }
+      .work-panel.thinking .work-dot,
+      .work-panel.tool .work-dot,
+      .work-panel.replying .work-dot {
+        background: #2f7d54;
+        animation: pulse 1.2s ease-in-out infinite;
+      }
+      .work-panel.waiting .work-dot {
+        background: #b7791f;
+      }
+      .work-panel.complete .work-dot {
+        background: #2f7d54;
+      }
+      .work-panel.error .work-dot {
+        background: #b42318;
+      }
+      .work-label {
+        font-weight: 750;
+      }
+      .work-detail {
+        margin-top: 2px;
+        color: #746f67;
+        font-size: 12px;
+        line-height: 1.45;
+        word-break: break-word;
+        white-space: pre-wrap;
+      }
+      .activity-list {
+        display: grid;
+        gap: 8px;
+        max-height: 220px;
+        overflow-y: auto;
+      }
+      .activity-item {
+        border: 1px solid #e7e3da;
+        border-left-width: 4px;
+        border-radius: 8px;
+        padding: 9px 10px;
+        background: #fff;
+      }
+      .activity-item.running {
+        border-left-color: #2f7d54;
+      }
+      .activity-item.waiting {
+        border-left-color: #b7791f;
+      }
+      .activity-item.done {
+        border-left-color: #6a8f7a;
+      }
+      .activity-item.error {
+        border-left-color: #b42318;
+      }
+      .activity-item.empty {
+        color: #746f67;
+        border-left-color: #d6d1c6;
+        background: #fbfaf7;
+      }
+      .activity-head {
+        display: flex;
+        justify-content: space-between;
+        gap: 10px;
+        color: #746f67;
+        font-size: 11px;
+        margin-bottom: 4px;
+      }
+      .activity-title {
+        display: block;
+        color: #202020;
+        font-weight: 700;
+      }
+      .activity-detail {
+        margin-top: 6px;
+        color: #5f5a52;
+        background: #f7f7f4;
+        border-radius: 6px;
+        padding: 7px;
+        font-size: 12px;
+        line-height: 1.45;
+        white-space: pre-wrap;
+        word-break: break-word;
+        max-height: 120px;
+        overflow: auto;
+      }
       .chat-log {
         flex: 1;
         min-height: 320px;
@@ -384,6 +488,11 @@ export const litePageHtml = String.raw`<!doctype html>
         padding: 10px;
         font-size: 12px;
       }
+      @keyframes pulse {
+        0% { opacity: 0.45; transform: scale(0.9); }
+        50% { opacity: 1; transform: scale(1.08); }
+        100% { opacity: 0.45; transform: scale(0.9); }
+      }
       @media (max-width: 640px) {
         .shell { width: 100%; }
         .panel { margin: 12px; }
@@ -392,6 +501,7 @@ export const litePageHtml = String.raw`<!doctype html>
         .workspace-head { grid-template-columns: auto minmax(0, 1fr) auto; }
         .workspace-count { display: none; }
         .chat-head { margin: 8px 12px 0; }
+        .work-panel { margin: 8px 12px 0; }
         .chat-log { padding: 12px; }
         .bubble { max-width: 92%; }
         .bottom-btn {
@@ -446,6 +556,22 @@ export const litePageHtml = String.raw`<!doctype html>
           <div id="chatSubtitle" class="chat-subtitle">选择历史对话会自动加载聊天记录。</div>
         </div>
 
+        <div id="workPanel" class="work-panel idle">
+          <div class="work-status">
+            <span class="work-dot"></span>
+            <div>
+              <div id="workLabel" class="work-label">空闲</div>
+              <div id="workDetail" class="work-detail">发送消息后会显示 Codex 的实时状态。</div>
+            </div>
+          </div>
+          <div id="activityList" class="activity-list">
+            <div class="activity-item empty">
+              <span class="activity-title">暂无活动</span>
+              <div class="work-detail">发送消息后，这里会显示思考、计划、工具调用和审批状态。</div>
+            </div>
+          </div>
+        </div>
+
         <div id="chatLog" class="chat-log">
           <div class="empty-state">连接后选择一个对话，或输入消息新建对话。</div>
         </div>
@@ -479,6 +605,7 @@ export const litePageHtml = String.raw`<!doctype html>
         var historyLoadSeq = 0;
         var threadListRefreshTimer = null;
         var workspaceOpenByKey = readWorkspaceOpenState();
+        var activities = [];
 
         var pairingInput = document.getElementById("pairingCode");
         var sessionInput = document.getElementById("sessionId");
@@ -495,6 +622,10 @@ export const litePageHtml = String.raw`<!doctype html>
         var cwdEl = document.getElementById("cwd");
         var chatTitle = document.getElementById("chatTitle");
         var chatSubtitle = document.getElementById("chatSubtitle");
+        var workPanel = document.getElementById("workPanel");
+        var workLabel = document.getElementById("workLabel");
+        var workDetail = document.getElementById("workDetail");
+        var activityList = document.getElementById("activityList");
         var sendBtn = document.getElementById("sendBtn");
         var bottomBtn = document.getElementById("bottomBtn");
 
@@ -515,6 +646,91 @@ export const litePageHtml = String.raw`<!doctype html>
             text += String(body);
           }
           logEl.textContent = text + "\n\n" + logEl.textContent;
+        }
+
+        function setWork(phase, label, detail) {
+          workPanel.className = "work-panel " + (phase || "idle");
+          workLabel.textContent = label || "空闲";
+          workDetail.textContent = detail || "";
+        }
+
+        function resetActivities() {
+          activities = [];
+          renderActivities();
+        }
+
+        function upsertActivity(item) {
+          item.ts = Date.now();
+          var found = false;
+          for (var i = 0; i < activities.length; i++) {
+            if (activities[i].id === item.id) {
+              activities[i] = Object.assign({}, activities[i], item);
+              found = true;
+              break;
+            }
+          }
+          if (!found) {
+            activities.unshift(item);
+          }
+          activities = activities.slice(0, 60);
+          renderActivities();
+        }
+
+        function appendActivityDetail(id, seed, detail) {
+          if (!detail) return;
+          var existing = null;
+          for (var i = 0; i < activities.length; i++) {
+            if (activities[i].id === id) {
+              existing = activities[i];
+              break;
+            }
+          }
+          var nextDetail = shorten([existing && existing.detail, detail].filter(Boolean).join("\n"), 1800);
+          upsertActivity(Object.assign({}, seed, { id: id, detail: nextDetail }));
+        }
+
+        function renderActivities() {
+          activityList.innerHTML = "";
+          if (!activities.length) {
+            var empty = document.createElement("div");
+            empty.className = "activity-item empty";
+            var title = document.createElement("span");
+            title.className = "activity-title";
+            title.textContent = "暂无活动";
+            var detail = document.createElement("div");
+            detail.className = "work-detail";
+            detail.textContent = "发送消息后，这里会显示思考、计划、工具调用和审批状态。";
+            empty.appendChild(title);
+            empty.appendChild(detail);
+            activityList.appendChild(empty);
+            return;
+          }
+
+          for (var i = 0; i < activities.length; i++) {
+            var item = activities[i];
+            var node = document.createElement("div");
+            node.className = "activity-item " + (item.state || "running");
+            var head = document.createElement("div");
+            head.className = "activity-head";
+            var kind = document.createElement("span");
+            kind.textContent = item.kind || "活动";
+            var time = document.createElement("time");
+            time.textContent = new Date(item.ts).toLocaleTimeString();
+            head.appendChild(kind);
+            head.appendChild(time);
+            var title = document.createElement("span");
+            title.className = "activity-title";
+            title.textContent = item.title || "";
+            node.appendChild(head);
+            node.appendChild(title);
+            if (item.detail) {
+              var detail = document.createElement("div");
+              detail.className = "activity-detail";
+              detail.textContent = item.detail;
+              node.appendChild(detail);
+            }
+            activityList.appendChild(node);
+          }
         }
 
         function envelope(type, payload, requestId) {
@@ -965,6 +1181,8 @@ export const litePageHtml = String.raw`<!doctype html>
           historyLoadSeq++;
           activeAssistantItemId = "";
           lastAssistantBubble = null;
+          resetActivities();
+          setWork("thinking", "等待 Codex 开始处理", "请求已发出，正在等待 Codex 事件流。");
           addBubble("user", prompt);
           promptEl.value = "";
           autoSizePrompt();
@@ -999,8 +1217,258 @@ export const litePageHtml = String.raw`<!doctype html>
             currentThreadId = threadId;
             localStorage.setItem("threadId", threadId);
           }
+          setWork("thinking", "等待 Codex 回复", "已发送，等待 Codex 返回实时状态。");
           show(actionMsg, "已发送，等待 Codex 回复。");
           scheduleThreadListRefresh(threadId);
+        }
+
+        function updateWorkActivity(message) {
+          if (!message || typeof message.method !== "string") return;
+
+          var params = message.params || {};
+          var threadId = params.threadId || (params.thread && params.thread.id);
+          if (threadId && currentThreadId && threadId !== currentThreadId) return;
+
+          if (message.id !== undefined && isServerRequestMethod(message.method)) {
+            handleServerRequestActivity(message);
+            return;
+          }
+
+          if (message.method === "thread/started") {
+            upsertActivity({
+              id: "thread:" + ((params.thread && params.thread.id) || Date.now()),
+              kind: "状态",
+              title: "已创建对话",
+              detail: params.thread && params.thread.cwd ? "工作目录：" + params.thread.cwd : "",
+              state: "done"
+            });
+            return;
+          }
+
+          if (message.method === "turn/started") {
+            var turnId = (params.turn && params.turn.id) || params.turnId || "active";
+            setWork("thinking", "正在思考", "Codex 已开始处理这条消息。");
+            upsertActivity({
+              id: "turn:" + turnId,
+              kind: "状态",
+              title: "开始处理请求",
+              detail: "正在分析上下文、规划下一步。",
+              state: "running"
+            });
+            return;
+          }
+
+          if (message.method === "turn/plan/updated") {
+            setWork("thinking", "计划已更新", currentPlanStep(params.plan) || "Codex 正在规划下一步。");
+            upsertActivity({
+              id: "plan:" + (params.turnId || "active"),
+              kind: "计划",
+              title: "计划已更新",
+              detail: formatPlanUpdate(params),
+              state: planHasRunningStep(params.plan) ? "running" : "done"
+            });
+            return;
+          }
+
+          if (message.method === "item/started") {
+            var started = describeThreadItem(params.item, false);
+            if (started) {
+              setWork(started.phase, started.title, started.detail);
+              upsertActivity(started);
+            }
+            return;
+          }
+
+          if (message.method === "item/completed") {
+            var completed = describeThreadItem(params.item, true);
+            if (completed) {
+              setWork(completed.state === "error" ? "error" : completed.phase, completed.title, completed.detail);
+              upsertActivity(completed);
+            }
+            return;
+          }
+
+          if (message.method === "item/agentMessage/delta") {
+            var replyId = params.itemId || params.turnId || "active";
+            setWork("replying", "正在回复", "Codex 正在输出回答。");
+            upsertActivity({
+              id: "reply:" + replyId,
+              kind: "回复",
+              title: "正在生成回复",
+              detail: "回答内容正在流式返回。",
+              state: "running"
+            });
+            return;
+          }
+
+          if (message.method === "item/plan/delta") {
+            var planId = params.itemId || "plan:" + (params.turnId || "active");
+            setWork("thinking", "正在更新计划", "Codex 正在整理执行步骤。");
+            appendActivityDetail(planId, {
+              kind: "计划",
+              title: "正在更新计划",
+              state: "running"
+            }, String(params.delta || ""));
+            return;
+          }
+
+          if (message.method === "item/commandExecution/outputDelta") {
+            var commandId = params.itemId || "command:" + (params.turnId || "active");
+            setWork("tool", "命令正在输出", "Codex 调用的命令正在返回结果。");
+            appendActivityDetail(commandId, {
+              kind: "工具",
+              title: "命令正在输出",
+              state: "running"
+            }, String(params.delta || ""));
+            return;
+          }
+
+          if (message.method === "item/fileChange/outputDelta") {
+            var fileOutputId = params.itemId || "file:" + (params.turnId || "active");
+            setWork("tool", "文件修改中", "Codex 正在应用文件变更。");
+            appendActivityDetail(fileOutputId, {
+              kind: "文件",
+              title: "文件修改输出",
+              state: "running"
+            }, String(params.delta || ""));
+            return;
+          }
+
+          if (message.method === "item/fileChange/patchUpdated") {
+            var filePatchId = params.itemId || "file:" + (params.turnId || "active");
+            setWork("tool", "文件改动已更新", "Codex 正在准备或应用补丁。");
+            upsertActivity({
+              id: filePatchId,
+              kind: "文件",
+              title: "文件改动已更新",
+              detail: formatFileChanges(params.changes),
+              state: "running"
+            });
+            return;
+          }
+
+          if (message.method === "item/mcpToolCall/progress") {
+            var mcpId = params.itemId || "mcp:" + (params.turnId || "active");
+            setWork("tool", "MCP 工具运行中", String(params.message || "工具正在返回进度。"));
+            upsertActivity({
+              id: mcpId,
+              kind: "MCP",
+              title: "MCP 工具运行中",
+              detail: String(params.message || ""),
+              state: "running"
+            });
+            return;
+          }
+
+          if (
+            message.method === "item/reasoning/summaryPartAdded" ||
+            message.method === "item/reasoning/summaryTextDelta" ||
+            message.method === "item/reasoning/textDelta"
+          ) {
+            var reasoningId = params.itemId || "reasoning:" + (params.turnId || "active");
+            setWork("thinking", "正在思考", "Codex 正在分析上下文。");
+            upsertActivity({
+              id: reasoningId,
+              kind: "思考",
+              title: "正在思考",
+              detail: "收到推理进度更新。",
+              state: "running"
+            });
+            return;
+          }
+
+          if (message.method === "hook/started") {
+            setWork("tool", "Hook 运行中", formatHookRun(params.run));
+            upsertActivity({
+              id: "hook:" + ((params.run && params.run.id) || Date.now()),
+              kind: "Hook",
+              title: "Hook 运行中",
+              detail: formatHookRun(params.run),
+              state: "running"
+            });
+            return;
+          }
+
+          if (message.method === "hook/completed") {
+            var hookFailed = params.run && params.run.status === "failed";
+            setWork(hookFailed ? "error" : "tool", hookFailed ? "Hook 失败" : "Hook 已完成", formatHookRun(params.run));
+            upsertActivity({
+              id: "hook:" + ((params.run && params.run.id) || Date.now()),
+              kind: "Hook",
+              title: hookFailed ? "Hook 失败" : "Hook 已完成",
+              detail: formatHookRun(params.run),
+              state: hookFailed ? "error" : "done"
+            });
+            return;
+          }
+
+          if (message.method === "serverRequest/resolved") {
+            setWork("thinking", "审批已处理", "Codex 继续执行当前任务。");
+            upsertActivity({
+              id: "request:" + (params.requestId || Date.now()),
+              kind: "审批",
+              title: "审批已处理",
+              state: "done"
+            });
+            return;
+          }
+
+          if (message.method === "turn/completed") {
+            var doneTurnId = (params.turn && params.turn.id) || params.turnId || "active";
+            var failed = params.turn && params.turn.status === "failed";
+            var interrupted = params.turn && params.turn.status === "interrupted";
+            var title = interrupted ? "已打断" : failed ? "处理失败" : "处理完成";
+            var detail = params.turn && params.turn.error && params.turn.error.message
+              ? params.turn.error.message
+              : interrupted
+                ? "这次回复已被打断。"
+                : "Codex 已完成这次回复。";
+            setWork(failed ? "error" : "complete", title, detail);
+            upsertActivity({
+              id: "turn:" + doneTurnId,
+              kind: "状态",
+              title: title,
+              detail: detail,
+              state: failed ? "error" : "done"
+            });
+            return;
+          }
+
+          if (message.method === "error") {
+            setWork("error", "Codex 返回错误", String(params.message || "未知错误"));
+            upsertActivity({
+              id: "error:" + Date.now(),
+              kind: "错误",
+              title: "Codex 返回错误",
+              detail: String(params.message || "未知错误"),
+              state: "error"
+            });
+            return;
+          }
+
+          if (message.method === "warning" || message.method === "guardianWarning" || message.method === "configWarning") {
+            upsertActivity({
+              id: message.method + ":" + Date.now(),
+              kind: "警告",
+              title: "Codex 警告",
+              detail: String(params.message || params.warning || "收到警告。"),
+              state: "error"
+            });
+          }
+        }
+
+        function handleServerRequestActivity(message) {
+          var params = message.params || {};
+          if (params.threadId && currentThreadId && params.threadId !== currentThreadId) return;
+          var request = describeServerRequest(message.method, params);
+          setWork("waiting", request.title, request.detail);
+          upsertActivity({
+            id: "request:" + message.id,
+            kind: "审批",
+            title: request.title,
+            detail: request.detail,
+            state: "waiting"
+          });
         }
 
         function handleCodexEvent(message) {
@@ -1010,6 +1478,8 @@ export const litePageHtml = String.raw`<!doctype html>
           if (params.threadId && currentThreadId && params.threadId !== currentThreadId) {
             return;
           }
+
+          updateWorkActivity(message);
 
           if (message.method === "thread/started" && params.thread && params.thread.id && !currentThreadId) {
             currentThreadId = params.thread.id;
@@ -1118,6 +1588,299 @@ export const litePageHtml = String.raw`<!doctype html>
           node.textContent = text || "";
           activeAssistantItemId = itemId;
           scrollChat();
+        }
+
+        function isServerRequestMethod(method) {
+          return method === "item/commandExecution/requestApproval" ||
+            method === "item/fileChange/requestApproval" ||
+            method === "item/permissions/requestApproval" ||
+            method === "item/tool/requestUserInput" ||
+            method === "item/tool/call" ||
+            method === "mcpServer/elicitation/request" ||
+            method === "applyPatchApproval" ||
+            method === "execCommandApproval" ||
+            method === "account/chatgptAuthTokens/refresh";
+        }
+
+        function describeServerRequest(method, params) {
+          if (method === "item/commandExecution/requestApproval" || method === "execCommandApproval") {
+            return {
+              title: "等待命令审批",
+              detail: [params.command, params.cwd ? "目录：" + params.cwd : "", params.reason].filter(Boolean).join("\n")
+            };
+          }
+          if (method === "item/fileChange/requestApproval" || method === "applyPatchApproval") {
+            return {
+              title: "等待文件修改审批",
+              detail: [params.reason, params.grantRoot ? "授权目录：" + params.grantRoot : ""].filter(Boolean).join("\n")
+            };
+          }
+          if (method === "item/tool/call") {
+            return {
+              title: "工具调用中",
+              detail: formatToolName(params.namespace, params.tool) + "\n" + formatJson(params.arguments)
+            };
+          }
+          if (method === "mcpServer/elicitation/request") {
+            return {
+              title: "等待 MCP 输入",
+              detail: [params.serverName, params.message, params.url].filter(Boolean).join("\n")
+            };
+          }
+          if (method === "item/tool/requestUserInput") {
+            return {
+              title: "等待用户输入",
+              detail: Array.isArray(params.questions)
+                ? params.questions.map(function (question) {
+                    return question.question || question.header || question.id;
+                  }).join("\n")
+                : ""
+            };
+          }
+          if (method === "item/permissions/requestApproval") {
+            return {
+              title: "等待权限审批",
+              detail: [params.reason, params.cwd ? "目录：" + params.cwd : "", formatJson(params.permissions)]
+                .filter(Boolean)
+                .join("\n")
+            };
+          }
+          return {
+            title: "等待 Codex 请求",
+            detail: method
+          };
+        }
+
+        function describeThreadItem(item, completed) {
+          if (!item || !item.type) return null;
+          var itemId = typeof item.id === "string" ? item.id : item.type + ":" + Date.now();
+
+          if (item.type === "agentMessage") {
+            return {
+              id: "reply:" + itemId,
+              phase: "replying",
+              kind: "回复",
+              title: completed ? "回复已完成" : "正在生成回复",
+              detail: completed ? "最终回答已返回。" : "回答内容正在流式返回。",
+              state: completed ? "done" : "running"
+            };
+          }
+          if (item.type === "plan") {
+            return {
+              id: itemId,
+              phase: "thinking",
+              kind: "计划",
+              title: completed ? "计划已记录" : "正在制定计划",
+              detail: item.text || "",
+              state: completed ? "done" : "running"
+            };
+          }
+          if (item.type === "reasoning") {
+            return {
+              id: itemId,
+              phase: "thinking",
+              kind: "思考",
+              title: completed ? "思考阶段完成" : "正在思考",
+              detail: "Codex 正在分析上下文。",
+              state: completed ? "done" : "running"
+            };
+          }
+          if (item.type === "commandExecution") {
+            return {
+              id: itemId,
+              phase: "tool",
+              kind: "工具",
+              title: commandTitle(item.status, completed),
+              detail: formatCommandItem(item),
+              state: stateFromStatus(item.status, completed)
+            };
+          }
+          if (item.type === "fileChange") {
+            var fileState = stateFromStatus(item.status, completed);
+            return {
+              id: itemId,
+              phase: "tool",
+              kind: "文件",
+              title: fileState === "done" ? "文件修改完成" : fileState === "error" ? "文件修改失败" : "文件修改中",
+              detail: formatFileChanges(item.changes),
+              state: fileState
+            };
+          }
+          if (item.type === "mcpToolCall") {
+            return {
+              id: itemId,
+              phase: "tool",
+              kind: "MCP",
+              title: toolTitle("MCP 工具", item.status, completed),
+              detail: [
+                (item.server || "MCP") + " / " + (item.tool || "tool"),
+                item.arguments ? formatJson(item.arguments) : "",
+                item.error && item.error.message ? "错误：" + item.error.message : ""
+              ].filter(Boolean).join("\n"),
+              state: stateFromStatus(item.status, completed)
+            };
+          }
+          if (item.type === "dynamicToolCall") {
+            return {
+              id: itemId,
+              phase: "tool",
+              kind: "工具",
+              title: toolTitle("工具调用", item.status, completed),
+              detail: [
+                formatToolName(item.namespace, item.tool),
+                item.arguments ? formatJson(item.arguments) : "",
+                item.success === false ? "结果：失败" : ""
+              ].filter(Boolean).join("\n"),
+              state: stateFromStatus(item.status, completed)
+            };
+          }
+          if (item.type === "collabAgentToolCall") {
+            return {
+              id: itemId,
+              phase: "tool",
+              kind: "子任务",
+              title: toolTitle("子任务工具", item.status, completed),
+              detail: [String(item.tool || ""), item.prompt ? shorten(item.prompt, 800) : ""].filter(Boolean).join("\n"),
+              state: stateFromStatus(item.status, completed)
+            };
+          }
+          if (item.type === "webSearch") {
+            return {
+              id: itemId,
+              phase: "tool",
+              kind: "搜索",
+              title: completed ? "搜索已完成" : "正在搜索",
+              detail: item.query || "",
+              state: completed ? "done" : "running"
+            };
+          }
+          if (item.type === "imageGeneration") {
+            var imageState = stateFromStatus(item.status, completed);
+            return {
+              id: itemId,
+              phase: "tool",
+              kind: "图片",
+              title: imageState === "done" ? "图片已生成" : "图片生成中",
+              detail: [item.revisedPrompt, item.savedPath].filter(Boolean).join("\n"),
+              state: imageState
+            };
+          }
+          if (item.type === "imageView") {
+            return {
+              id: itemId,
+              phase: "tool",
+              kind: "图片",
+              title: "查看图片",
+              detail: item.path || "",
+              state: completed ? "done" : "running"
+            };
+          }
+          return {
+            id: itemId,
+            phase: "tool",
+            kind: "项目",
+            title: completed ? item.type + " 已完成" : item.type + " 进行中",
+            state: completed ? "done" : "running"
+          };
+        }
+
+        function formatPlanUpdate(params) {
+          var explanation = params.explanation ? String(params.explanation) : "";
+          var steps = Array.isArray(params.plan)
+            ? params.plan.map(function (step) {
+                return (statusLabel(step && step.status) + " " + String((step && step.step) || "")).replace(/^\s+|\s+$/g, "");
+              }).filter(Boolean).join("\n")
+            : "";
+          return [explanation, steps].filter(Boolean).join("\n");
+        }
+
+        function planHasRunningStep(plan) {
+          if (!Array.isArray(plan)) return false;
+          for (var i = 0; i < plan.length; i++) {
+            if (plan[i] && plan[i].status === "inProgress") return true;
+          }
+          return false;
+        }
+
+        function currentPlanStep(plan) {
+          if (!Array.isArray(plan)) return "";
+          for (var i = 0; i < plan.length; i++) {
+            if (plan[i] && plan[i].status === "inProgress" && plan[i].step) {
+              return String(plan[i].step);
+            }
+          }
+          return "";
+        }
+
+        function formatCommandItem(item) {
+          return [
+            item.command ? "$ " + item.command : "",
+            item.cwd ? "目录：" + item.cwd : "",
+            item.exitCode !== null && item.exitCode !== undefined ? "退出码：" + item.exitCode : "",
+            item.aggregatedOutput ? shorten(String(item.aggregatedOutput), 1800) : ""
+          ].filter(Boolean).join("\n");
+        }
+
+        function formatFileChanges(changes) {
+          if (!Array.isArray(changes) || !changes.length) return "";
+          return changes.map(function (change) {
+            return String((change.kind || "change") + " " + (change.path || "")).replace(/^\s+|\s+$/g, "");
+          }).filter(Boolean).join("\n");
+        }
+
+        function formatHookRun(run) {
+          if (!run) return "";
+          return [run.eventName, run.handlerType, run.statusMessage, run.sourcePath].filter(Boolean).join("\n");
+        }
+
+        function stateFromStatus(status, completed) {
+          var value = String(status || "").toLowerCase();
+          if (value === "failed" || value === "declined" || value === "errored" || value === "blocked" || value === "error") {
+            return "error";
+          }
+          if (value === "pending" || value === "pendinginit" || value === "waiting") {
+            return "waiting";
+          }
+          if (completed || value === "completed" || value === "success" || value === "succeeded") {
+            return "done";
+          }
+          return "running";
+        }
+
+        function commandTitle(status, completed) {
+          var state = stateFromStatus(status, completed);
+          if (state === "done") return "命令已完成";
+          if (state === "error") return "命令失败";
+          if (state === "waiting") return "命令等待中";
+          return "命令运行中";
+        }
+
+        function toolTitle(name, status, completed) {
+          var state = stateFromStatus(status, completed);
+          if (state === "done") return name + "已完成";
+          if (state === "error") return name + "失败";
+          if (state === "waiting") return name + "等待中";
+          return name + "运行中";
+        }
+
+        function statusLabel(status) {
+          if (status === "completed") return "✓";
+          if (status === "inProgress") return "→";
+          if (status === "pending") return "·";
+          return "-";
+        }
+
+        function formatToolName(namespace, tool) {
+          return [namespace, tool].filter(Boolean).join(".") || "tool";
+        }
+
+        function formatJson(value) {
+          if (value === undefined || value === null || value === "") return "";
+          try {
+            return shorten(JSON.stringify(value, null, 2), 1200);
+          } catch (_) {
+            return shorten(String(value), 1200);
+          }
         }
 
         function renderEmpty(text) {
