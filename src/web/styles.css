@@ -232,6 +232,124 @@ label {
   flex-wrap: wrap;
 }
 
+.work-status {
+  display: grid;
+  grid-template-columns: 12px 1fr;
+  gap: 10px;
+  align-items: start;
+  border: 1px solid #dedbd2;
+  border-radius: 8px;
+  padding: 11px 12px;
+  background: #fbfaf7;
+}
+
+.work-status > span {
+  width: 10px;
+  height: 10px;
+  margin-top: 5px;
+  border-radius: 999px;
+  background: #9a948a;
+}
+
+.work-status.thinking > span,
+.work-status.tool > span,
+.work-status.replying > span {
+  background: #2f7d54;
+  animation: pulse 1.2s ease-in-out infinite;
+}
+
+.work-status.waiting > span {
+  background: #b7791f;
+}
+
+.work-status.complete > span {
+  background: #2f7d54;
+}
+
+.work-status.error > span {
+  background: #b42318;
+}
+
+.work-status strong {
+  display: block;
+}
+
+.work-status p {
+  margin: 3px 0 0;
+  color: #6a645b;
+  line-height: 1.4;
+  word-break: break-word;
+}
+
+.activity-list {
+  display: grid;
+  gap: 8px;
+  max-height: 360px;
+  overflow: auto;
+}
+
+.activity-item {
+  border: 1px solid #e7e3da;
+  border-left-width: 4px;
+  border-radius: 8px;
+  padding: 10px;
+  background: #fff;
+}
+
+.activity-item.running {
+  border-left-color: #2f7d54;
+}
+
+.activity-item.waiting {
+  border-left-color: #b7791f;
+}
+
+.activity-item.done {
+  border-left-color: #6a8f7a;
+}
+
+.activity-item.error {
+  border-left-color: #b42318;
+}
+
+.activity-item.empty {
+  color: #6a645b;
+  border-left-color: #d6d1c6;
+  background: #fbfaf7;
+}
+
+.activity-item header {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  color: #6a645b;
+  font-size: 12px;
+  margin-bottom: 4px;
+}
+
+.activity-item strong {
+  display: block;
+  color: #202020;
+}
+
+.activity-item p {
+  margin: 4px 0 0;
+  color: #6a645b;
+  line-height: 1.45;
+}
+
+.activity-item pre {
+  margin: 8px 0 0;
+  max-height: 160px;
+  overflow: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+  background: #f7f7f4;
+  border-radius: 6px;
+  padding: 8px;
+  font-size: 12px;
+}
+
 .events {
   min-height: 260px;
 }
@@ -264,6 +382,21 @@ label {
   border-radius: 6px;
   padding: 10px;
   font-size: 12px;
+}
+
+@keyframes pulse {
+  0% {
+    opacity: 0.45;
+    transform: scale(0.9);
+  }
+  50% {
+    opacity: 1;
+    transform: scale(1.08);
+  }
+  100% {
+    opacity: 0.45;
+    transform: scale(0.9);
+  }
 }
 
 @media (max-width: 760px) {

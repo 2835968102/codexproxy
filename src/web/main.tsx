@@ -1,4 +1,4 @@
-import React, { FormEvent, useMemo, useRef, useState } from "react";
+import React, { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import {
   Envelope,
@@ -15,12 +15,37 @@ type LogItem = {
   body: unknown;
 };
 
+type ActivityState = "running" | "waiting" | "done" | "error";
+
+type ActivityItem = {
+  id: string;
+  ts: number;
+  kind: string;
+  title: string;
+  detail?: string;
+  state: ActivityState;
+};
+
+type WorkPhase = "idle" | "thinking" | "tool" | "waiting" | "replying" | "complete" | "error";
+
+type WorkStatus = {
+  phase: WorkPhase;
+  label: string;
+  detail?: string;
+  updatedAt?: number;
+};
+
 type Pending = {
   resolve: (value: RpcResponsePayload) => void;
   reject: (error: Error) => void;
 };
 
 const requestTimeoutMs = 120000;
+const idleWorkStatus: WorkStatus = {
+  phase: "idle",
+  label: "空闲",
+  detail: "发送消息后会显示 Codex 的实时状态。"
+};
 
 function App() {
   const [pairingCode, setPairingCode] = useState(localStorage.getItem("pairingCode") ?? "");
@@ -30,6 +55,8 @@ function App() {
   const [activeSession, setActiveSession] = useState<SessionSummary | undefined>();
   const [logs, setLogs] = useState<LogItem[]>([]);
   const [replies, setReplies] = useState<LogItem[]>([]);
+  const [activities, setActivities] = useState<ActivityItem[]>([]);
+  const [workStatus, setWorkStatus] = useState<WorkStatus>(idleWorkStatus);
   const [threads, setThreads] = useState<any[]>([]);
   const [currentThreadId, setCurrentThreadId] = useState("");
   const [prompt, setPrompt] = useState("");
@@ -41,8 +68,13 @@ function App() {
   const socketRef = useRef<WebSocket | undefined>(undefined);
   const pendingRef = useRef(new Map<string, Pending>());
   const currentTurnByThread = useRef(new Map<string, string>());
+  const currentThreadIdRef = useRef(currentThreadId);
   const activeReplyIdRef = useRef<string | undefined>(undefined);
   const retryingWithoutSessionRef = useRef(false);
+
+  useEffect(() => {
+    currentThreadIdRef.current = currentThreadId;
+  }, [currentThreadId]);
 
   const activeThread = useMemo(
     () => threads.find((thread) => thread.id === currentThreadId),
@@ -61,6 +93,45 @@ function App() {
         ...items
       ].slice(0, 120)
     );
+  }
+
+  function setWork(phase: WorkPhase, label: string, detail?: string) {
+    setWorkStatus({ phase, label, detail, updatedAt: Date.now() });
+  }
+
+  function upsertActivity(next: Omit<ActivityItem, "ts">) {
+    setActivities((items) => {
+      const ts = Date.now();
+      const existingIndex = items.findIndex((item) => item.id === next.id);
+      if (existingIndex >= 0) {
+        const updated = items.slice();
+        updated[existingIndex] = { ...updated[existingIndex]!, ...next, ts };
+        return updated.slice(0, 60);
+      }
+      return [{ ...next, ts }, ...items].slice(0, 60);
+    });
+  }
+
+  function appendActivityDetail(id: string, seed: Omit<ActivityItem, "id" | "ts" | "detail">, detail: string) {
+    if (!detail) {
+      return;
+    }
+    setActivities((items) => {
+      const ts = Date.now();
+      const existingIndex = items.findIndex((item) => item.id === id);
+      if (existingIndex >= 0) {
+        const existing = items[existingIndex]!;
+        const updated = items.slice();
+        updated[existingIndex] = {
+          ...existing,
+          ...seed,
+          ts,
+          detail: shortenText([existing.detail, detail].filter(Boolean).join("\n"), 1800)
+        };
+        return updated.slice(0, 60);
+      }
+      return [{ id, ts, ...seed, detail: shortenText(detail, 1800) }, ...items].slice(0, 60);
+    });
   }
 
   function connect(event?: FormEvent) {
@@ -187,6 +258,7 @@ function App() {
       const message = (envelope.payload as any).message;
       addLog("codex", message);
       updateTurnTracking(message);
+      updateWorkActivity(message);
       updateReplies(message);
       return;
     }
@@ -201,6 +273,11 @@ function App() {
 
   function updateTurnTracking(message: unknown) {
     const msg = message as any;
+    if (msg?.method === "thread/started" && msg.params?.thread?.id && !currentThreadIdRef.current) {
+      currentThreadIdRef.current = msg.params.thread.id;
+      setCurrentThreadId(msg.params.thread.id);
+      localStorage.setItem("threadId", msg.params.thread.id);
+    }
     if (msg?.method === "turn/started" && msg.params?.threadId && msg.params?.turn?.id) {
       currentTurnByThread.current.set(msg.params.threadId, msg.params.turn.id);
       activeReplyIdRef.current = undefined;
@@ -212,7 +289,8 @@ function App() {
 
   function updateReplies(message: unknown) {
     const msg = message as any;
-    if (msg?.params?.threadId && currentThreadId && msg.params.threadId !== currentThreadId) {
+    const selectedThreadId = currentThreadIdRef.current;
+    if (msg?.params?.threadId && selectedThreadId && msg.params.threadId !== selectedThreadId) {
       return;
     }
 
@@ -251,6 +329,250 @@ function App() {
         return [...items, { id: item.id, ts: Date.now(), kind: "Codex", body: item.text }].slice(-40);
       });
     }
+  }
+
+  function updateWorkActivity(message: unknown) {
+    const msg = message as any;
+    if (!msg || typeof msg.method !== "string") {
+      return;
+    }
+
+    const params = msg.params ?? {};
+    const threadId = params.threadId ?? params.thread?.id;
+    const selectedThreadId = currentThreadIdRef.current;
+    if (threadId && selectedThreadId && threadId !== selectedThreadId) {
+      return;
+    }
+
+    if (msg.id !== undefined && isServerRequestMethod(msg.method)) {
+      handleServerRequestActivity(msg);
+      return;
+    }
+
+    switch (msg.method) {
+      case "thread/started":
+        upsertActivity({
+          id: `thread:${params.thread?.id ?? Date.now()}`,
+          kind: "状态",
+          title: "已创建对话",
+          detail: params.thread?.cwd ? `工作目录：${params.thread.cwd}` : undefined,
+          state: "done"
+        });
+        return;
+      case "turn/started": {
+        const turnId = params.turn?.id ?? params.turnId ?? "active";
+        setWork("thinking", "正在思考", "Codex 已开始处理这条消息。");
+        upsertActivity({
+          id: `turn:${turnId}`,
+          kind: "状态",
+          title: "开始处理请求",
+          detail: "正在分析上下文、规划下一步。",
+          state: "running"
+        });
+        return;
+      }
+      case "turn/plan/updated": {
+        const detail = formatPlanUpdate(params);
+        const running = Array.isArray(params.plan) && params.plan.some((step: any) => step?.status === "inProgress");
+        setWork("thinking", "计划已更新", currentPlanStep(params.plan) ?? "Codex 正在规划下一步。");
+        upsertActivity({
+          id: `plan:${params.turnId ?? "active"}`,
+          kind: "计划",
+          title: "计划已更新",
+          detail,
+          state: running ? "running" : "done"
+        });
+        return;
+      }
+      case "item/started": {
+        const activity = describeThreadItem(params.item, false);
+        if (activity) {
+          setWork(activity.phase, activity.title, activity.detail);
+          upsertActivity(activity);
+        }
+        return;
+      }
+      case "item/completed": {
+        const activity = describeThreadItem(params.item, true);
+        if (activity) {
+          setWork(activity.state === "error" ? "error" : activity.phase, activity.title, activity.detail);
+          upsertActivity(activity);
+        }
+        return;
+      }
+      case "item/agentMessage/delta": {
+        const id = params.itemId || params.turnId || "active";
+        setWork("replying", "正在回复", "Codex 正在输出回答。");
+        upsertActivity({
+          id: `reply:${id}`,
+          kind: "回复",
+          title: "正在生成回复",
+          detail: "回答内容正在流式返回。",
+          state: "running"
+        });
+        return;
+      }
+      case "item/plan/delta": {
+        const id = params.itemId || `plan:${params.turnId ?? "active"}`;
+        setWork("thinking", "正在更新计划", "Codex 正在整理执行步骤。");
+        appendActivityDetail(
+          id,
+          { kind: "计划", title: "正在更新计划", state: "running" },
+          String(params.delta ?? "")
+        );
+        return;
+      }
+      case "item/commandExecution/outputDelta": {
+        const id = params.itemId || `command:${params.turnId ?? "active"}`;
+        setWork("tool", "命令正在输出", "Codex 调用的命令正在返回结果。");
+        appendActivityDetail(
+          id,
+          { kind: "工具", title: "命令正在输出", state: "running" },
+          String(params.delta ?? "")
+        );
+        return;
+      }
+      case "item/fileChange/outputDelta": {
+        const id = params.itemId || `file:${params.turnId ?? "active"}`;
+        setWork("tool", "文件修改中", "Codex 正在应用文件变更。");
+        appendActivityDetail(
+          id,
+          { kind: "文件", title: "文件修改输出", state: "running" },
+          String(params.delta ?? "")
+        );
+        return;
+      }
+      case "item/fileChange/patchUpdated": {
+        const id = params.itemId || `file:${params.turnId ?? "active"}`;
+        setWork("tool", "文件改动已更新", "Codex 正在准备或应用补丁。");
+        upsertActivity({
+          id,
+          kind: "文件",
+          title: "文件改动已更新",
+          detail: formatFileChanges(params.changes),
+          state: "running"
+        });
+        return;
+      }
+      case "item/mcpToolCall/progress": {
+        const id = params.itemId || `mcp:${params.turnId ?? "active"}`;
+        setWork("tool", "MCP 工具运行中", String(params.message ?? "工具正在返回进度。"));
+        upsertActivity({
+          id,
+          kind: "MCP",
+          title: "MCP 工具运行中",
+          detail: String(params.message ?? ""),
+          state: "running"
+        });
+        return;
+      }
+      case "item/reasoning/summaryPartAdded":
+      case "item/reasoning/summaryTextDelta":
+      case "item/reasoning/textDelta": {
+        const id = params.itemId || `reasoning:${params.turnId ?? "active"}`;
+        setWork("thinking", "正在思考", "Codex 正在分析上下文。");
+        upsertActivity({
+          id,
+          kind: "思考",
+          title: "正在思考",
+          detail: "收到推理进度更新。",
+          state: "running"
+        });
+        return;
+      }
+      case "hook/started":
+        setWork("tool", "Hook 运行中", formatHookRun(params.run));
+        upsertActivity({
+          id: `hook:${params.run?.id ?? Date.now()}`,
+          kind: "Hook",
+          title: "Hook 运行中",
+          detail: formatHookRun(params.run),
+          state: "running"
+        });
+        return;
+      case "hook/completed":
+        setWork(params.run?.status === "failed" ? "error" : "tool", "Hook 已完成", formatHookRun(params.run));
+        upsertActivity({
+          id: `hook:${params.run?.id ?? Date.now()}`,
+          kind: "Hook",
+          title: params.run?.status === "failed" ? "Hook 失败" : "Hook 已完成",
+          detail: formatHookRun(params.run),
+          state: params.run?.status === "failed" ? "error" : "done"
+        });
+        return;
+      case "serverRequest/resolved":
+        setWork("thinking", "审批已处理", "Codex 继续执行当前任务。");
+        upsertActivity({
+          id: `request:${params.requestId ?? Date.now()}`,
+          kind: "审批",
+          title: "审批已处理",
+          state: "done"
+        });
+        return;
+      case "turn/completed": {
+        const turnId = params.turn?.id ?? params.turnId ?? "active";
+        const state = params.turn?.status === "failed" ? "error" : "done";
+        const title =
+          params.turn?.status === "interrupted"
+            ? "已打断"
+            : params.turn?.status === "failed"
+              ? "处理失败"
+              : "处理完成";
+        const detail =
+          params.turn?.error?.message ??
+          (params.turn?.status === "interrupted" ? "这次回复已被打断。" : "Codex 已完成这次回复。");
+        setWork(state === "error" ? "error" : "complete", title, detail);
+        upsertActivity({
+          id: `turn:${turnId}`,
+          kind: "状态",
+          title,
+          detail,
+          state
+        });
+        return;
+      }
+      case "error":
+        setWork("error", "Codex 返回错误", String(params.message ?? "未知错误"));
+        upsertActivity({
+          id: `error:${Date.now()}`,
+          kind: "错误",
+          title: "Codex 返回错误",
+          detail: String(params.message ?? "未知错误"),
+          state: "error"
+        });
+        return;
+      case "warning":
+      case "guardianWarning":
+      case "configWarning":
+        upsertActivity({
+          id: `${msg.method}:${Date.now()}`,
+          kind: "警告",
+          title: "Codex 警告",
+          detail: String(params.message ?? params.warning ?? "收到警告。"),
+          state: "error"
+        });
+        return;
+      default:
+        return;
+    }
+  }
+
+  function handleServerRequestActivity(msg: any) {
+    const params = msg.params ?? {};
+    const id = `request:${msg.id}`;
+    if (params.threadId && currentThreadIdRef.current && params.threadId !== currentThreadIdRef.current) {
+      return;
+    }
+
+    const request = describeServerRequest(msg.method, params);
+    setWork("waiting", request.title, request.detail);
+    upsertActivity({
+      id,
+      kind: "审批",
+      title: request.title,
+      detail: request.detail,
+      state: "waiting"
+    });
   }
 
   function rpc(method: string, params?: unknown): Promise<RpcResponsePayload> {
@@ -321,6 +643,8 @@ function App() {
     setBusy(true);
     setPrompt("");
     activeReplyIdRef.current = undefined;
+    setActivities([]);
+    setWork("thinking", "等待 Codex 开始处理", "请求已发出，正在等待 Codex 事件流。");
     setReplies((items) =>
       [...items, { id: userReplyId, ts: Date.now(), kind: "你", body: submittedPrompt }].slice(-40)
     );
@@ -354,6 +678,14 @@ function App() {
       await refreshThreads(sentThreadId);
     } catch (error) {
       addLog("error", error instanceof Error ? error.message : error);
+      setWork("error", "发送失败", error instanceof Error ? error.message : String(error));
+      upsertActivity({
+        id: `send-error:${Date.now()}`,
+        kind: "错误",
+        title: "发送失败",
+        detail: error instanceof Error ? error.message : String(error),
+        state: "error"
+      });
     } finally {
       setBusy(false);
     }
@@ -518,6 +850,32 @@ function App() {
                   拒绝
                 </button>
               </div>
+              <div className={`work-status ${workStatus.phase}`}>
+                <span />
+                <div>
+                  <strong>{workStatus.label}</strong>
+                  {workStatus.detail && <p>{workStatus.detail}</p>}
+                </div>
+              </div>
+              <div className="activity-list">
+                {activities.length === 0 ? (
+                  <article className="activity-item empty">
+                    <strong>暂无活动</strong>
+                    <p>发送消息后，这里会显示思考、计划、工具调用和审批状态。</p>
+                  </article>
+                ) : (
+                  activities.map((item) => (
+                    <article key={item.id} className={`activity-item ${item.state}`}>
+                      <header>
+                        <span>{item.kind}</span>
+                        <time>{new Date(item.ts).toLocaleTimeString()}</time>
+                      </header>
+                      <strong>{item.title}</strong>
+                      {item.detail && <pre>{item.detail}</pre>}
+                    </article>
+                  ))
+                )}
+              </div>
           </section>
 
           <section className="panel events">
@@ -570,6 +928,335 @@ function App() {
       )}
     </main>
   );
+}
+
+type ActivityDescriptor = Omit<ActivityItem, "ts"> & { phase: WorkPhase };
+
+function isServerRequestMethod(method: string) {
+  return (
+    method === "item/commandExecution/requestApproval" ||
+    method === "item/fileChange/requestApproval" ||
+    method === "item/permissions/requestApproval" ||
+    method === "item/tool/requestUserInput" ||
+    method === "item/tool/call" ||
+    method === "mcpServer/elicitation/request" ||
+    method === "applyPatchApproval" ||
+    method === "execCommandApproval" ||
+    method === "account/chatgptAuthTokens/refresh"
+  );
+}
+
+function describeServerRequest(method: string, params: any) {
+  if (method === "item/commandExecution/requestApproval" || method === "execCommandApproval") {
+    return {
+      title: "等待命令审批",
+      detail: [params.command, params.cwd ? `目录：${params.cwd}` : "", params.reason].filter(Boolean).join("\n")
+    };
+  }
+  if (method === "item/fileChange/requestApproval" || method === "applyPatchApproval") {
+    return {
+      title: "等待文件修改审批",
+      detail: [params.reason, params.grantRoot ? `授权目录：${params.grantRoot}` : ""].filter(Boolean).join("\n")
+    };
+  }
+  if (method === "item/tool/call") {
+    return {
+      title: "工具调用中",
+      detail: `${formatToolName(params.namespace, params.tool)}\n${formatJson(params.arguments)}`
+    };
+  }
+  if (method === "mcpServer/elicitation/request") {
+    return {
+      title: "等待 MCP 输入",
+      detail: [params.serverName, params.message, params.url].filter(Boolean).join("\n")
+    };
+  }
+  if (method === "item/tool/requestUserInput") {
+    return {
+      title: "等待用户输入",
+      detail: Array.isArray(params.questions)
+        ? params.questions.map((question: any) => question.question || question.header || question.id).join("\n")
+        : undefined
+    };
+  }
+  if (method === "item/permissions/requestApproval") {
+    return {
+      title: "等待权限审批",
+      detail: [params.reason, params.cwd ? `目录：${params.cwd}` : "", formatJson(params.permissions)]
+        .filter(Boolean)
+        .join("\n")
+    };
+  }
+  return {
+    title: "等待 Codex 请求",
+    detail: method
+  };
+}
+
+function describeThreadItem(item: any, completed: boolean): ActivityDescriptor | undefined {
+  if (!item || typeof item.type !== "string") {
+    return undefined;
+  }
+
+  const itemId = typeof item.id === "string" ? item.id : `${item.type}:${Date.now()}`;
+  if (item.type === "agentMessage") {
+    return {
+      id: `reply:${itemId}`,
+      phase: "replying",
+      kind: "回复",
+      title: completed ? "回复已完成" : "正在生成回复",
+      detail: completed ? "最终回答已返回。" : "回答内容正在流式返回。",
+      state: completed ? "done" : "running"
+    };
+  }
+  if (item.type === "plan") {
+    return {
+      id: itemId,
+      phase: "thinking",
+      kind: "计划",
+      title: completed ? "计划已记录" : "正在制定计划",
+      detail: typeof item.text === "string" ? item.text : undefined,
+      state: completed ? "done" : "running"
+    };
+  }
+  if (item.type === "reasoning") {
+    return {
+      id: itemId,
+      phase: "thinking",
+      kind: "思考",
+      title: completed ? "思考阶段完成" : "正在思考",
+      detail: "Codex 正在分析上下文。",
+      state: completed ? "done" : "running"
+    };
+  }
+  if (item.type === "commandExecution") {
+    const state = stateFromStatus(item.status, completed);
+    return {
+      id: itemId,
+      phase: "tool",
+      kind: "工具",
+      title: commandTitle(item.status, completed),
+      detail: formatCommandItem(item),
+      state
+    };
+  }
+  if (item.type === "fileChange") {
+    const state = stateFromStatus(item.status, completed);
+    return {
+      id: itemId,
+      phase: "tool",
+      kind: "文件",
+      title: state === "done" ? "文件修改完成" : state === "error" ? "文件修改失败" : "文件修改中",
+      detail: formatFileChanges(item.changes),
+      state
+    };
+  }
+  if (item.type === "mcpToolCall") {
+    const state = stateFromStatus(item.status, completed);
+    return {
+      id: itemId,
+      phase: "tool",
+      kind: "MCP",
+      title: toolTitle("MCP 工具", item.status, completed),
+      detail: [
+        `${item.server ?? "MCP"} / ${item.tool ?? "tool"}`,
+        item.arguments ? formatJson(item.arguments) : "",
+        item.error?.message ? `错误：${item.error.message}` : ""
+      ]
+        .filter(Boolean)
+        .join("\n"),
+      state
+    };
+  }
+  if (item.type === "dynamicToolCall") {
+    const state = stateFromStatus(item.status, completed);
+    return {
+      id: itemId,
+      phase: "tool",
+      kind: "工具",
+      title: toolTitle("工具调用", item.status, completed),
+      detail: [
+        formatToolName(item.namespace, item.tool),
+        item.arguments ? formatJson(item.arguments) : "",
+        item.success === false ? "结果：失败" : ""
+      ]
+        .filter(Boolean)
+        .join("\n"),
+      state
+    };
+  }
+  if (item.type === "collabAgentToolCall") {
+    const state = stateFromStatus(item.status, completed);
+    return {
+      id: itemId,
+      phase: "tool",
+      kind: "子任务",
+      title: toolTitle("子任务工具", item.status, completed),
+      detail: [String(item.tool ?? ""), item.prompt ? shortenText(item.prompt, 800) : ""].filter(Boolean).join("\n"),
+      state
+    };
+  }
+  if (item.type === "webSearch") {
+    return {
+      id: itemId,
+      phase: "tool",
+      kind: "搜索",
+      title: completed ? "搜索已完成" : "正在搜索",
+      detail: item.query,
+      state: completed ? "done" : "running"
+    };
+  }
+  if (item.type === "imageGeneration") {
+    const state = stateFromStatus(item.status, completed);
+    return {
+      id: itemId,
+      phase: "tool",
+      kind: "图片",
+      title: state === "done" ? "图片已生成" : "图片生成中",
+      detail: [item.revisedPrompt, item.savedPath].filter(Boolean).join("\n"),
+      state
+    };
+  }
+  if (item.type === "imageView") {
+    return {
+      id: itemId,
+      phase: "tool",
+      kind: "图片",
+      title: "查看图片",
+      detail: item.path,
+      state: completed ? "done" : "running"
+    };
+  }
+  return {
+    id: itemId,
+    phase: "tool",
+    kind: "项目",
+    title: completed ? `${item.type} 已完成` : `${item.type} 进行中`,
+    state: completed ? "done" : "running"
+  };
+}
+
+function formatPlanUpdate(params: any) {
+  const explanation = typeof params.explanation === "string" && params.explanation.trim() ? params.explanation : "";
+  const steps = Array.isArray(params.plan)
+    ? params.plan
+        .map((step: any) => `${statusLabel(step?.status)} ${String(step?.step ?? "")}`.trim())
+        .filter(Boolean)
+        .join("\n")
+    : "";
+  return [explanation, steps].filter(Boolean).join("\n");
+}
+
+function currentPlanStep(plan: unknown) {
+  if (!Array.isArray(plan)) {
+    return undefined;
+  }
+  const current = plan.find((step: any) => step?.status === "inProgress");
+  return current?.step ? String(current.step) : undefined;
+}
+
+function formatCommandItem(item: any) {
+  const parts = [
+    item.command ? `$ ${item.command}` : "",
+    item.cwd ? `目录：${item.cwd}` : "",
+    item.exitCode !== null && item.exitCode !== undefined ? `退出码：${item.exitCode}` : "",
+    item.aggregatedOutput ? shortenText(String(item.aggregatedOutput), 1800) : ""
+  ];
+  return parts.filter(Boolean).join("\n");
+}
+
+function formatFileChanges(changes: unknown) {
+  if (!Array.isArray(changes) || changes.length === 0) {
+    return "";
+  }
+  return changes
+    .map((change: any) => `${change.kind ?? "change"} ${change.path ?? ""}`.trim())
+    .filter(Boolean)
+    .join("\n");
+}
+
+function formatHookRun(run: any) {
+  if (!run) {
+    return "";
+  }
+  return [run.eventName, run.handlerType, run.statusMessage, run.sourcePath].filter(Boolean).join("\n");
+}
+
+function stateFromStatus(status: unknown, completed: boolean): ActivityState {
+  const value = String(status ?? "").toLowerCase();
+  if (["failed", "declined", "errored", "blocked", "error"].includes(value)) {
+    return "error";
+  }
+  if (["pending", "pendinginit", "waiting"].includes(value)) {
+    return "waiting";
+  }
+  if (completed || ["completed", "success", "succeeded"].includes(value)) {
+    return "done";
+  }
+  return "running";
+}
+
+function commandTitle(status: unknown, completed: boolean) {
+  const state = stateFromStatus(status, completed);
+  if (state === "done") {
+    return "命令已完成";
+  }
+  if (state === "error") {
+    return "命令失败";
+  }
+  if (state === "waiting") {
+    return "命令等待中";
+  }
+  return "命令运行中";
+}
+
+function toolTitle(name: string, status: unknown, completed: boolean) {
+  const state = stateFromStatus(status, completed);
+  if (state === "done") {
+    return `${name}已完成`;
+  }
+  if (state === "error") {
+    return `${name}失败`;
+  }
+  if (state === "waiting") {
+    return `${name}等待中`;
+  }
+  return `${name}运行中`;
+}
+
+function statusLabel(status: unknown) {
+  switch (status) {
+    case "completed":
+      return "✓";
+    case "inProgress":
+      return "→";
+    case "pending":
+      return "·";
+    default:
+      return "-";
+  }
+}
+
+function formatToolName(namespace: unknown, tool: unknown) {
+  return [namespace, tool].filter(Boolean).join(".") || "tool";
+}
+
+function formatJson(value: unknown) {
+  if (value === undefined || value === null || value === "") {
+    return "";
+  }
+  try {
+    return shortenText(JSON.stringify(value, null, 2), 1200);
+  } catch {
+    return shortenText(String(value), 1200);
+  }
+}
+
+function shortenText(text: string, max: number) {
+  if (!text || text.length <= max) {
+    return text;
+  }
+  return `${text.slice(0, max)}\n...已截断 ${text.length - max} 字符`;
 }
 
 createRoot(document.getElementById("root")!).render(<App />);
