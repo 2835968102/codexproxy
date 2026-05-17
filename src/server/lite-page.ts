@@ -435,6 +435,63 @@ export const litePageHtml = String.raw`<!doctype html>
         font-size: 13px;
         max-width: 100%;
       }
+      .bubble.status-bubble {
+        border-left: 4px solid #9a948a;
+      }
+      .bubble.status-bubble.thinking,
+      .bubble.status-bubble.replying,
+      .bubble.status-bubble.tool {
+        border-left-color: #2f7d54;
+      }
+      .bubble.status-bubble.waiting {
+        border-left-color: #b7791f;
+      }
+      .bubble.status-bubble.complete {
+        border-left-color: #2f7d54;
+      }
+      .bubble.status-bubble.error {
+        border-left-color: #b42318;
+      }
+      .status-line {
+        display: grid;
+        grid-template-columns: 10px 1fr;
+        gap: 8px;
+        align-items: start;
+      }
+      .status-line::before {
+        content: "";
+        width: 8px;
+        height: 8px;
+        margin-top: 7px;
+        border-radius: 999px;
+        background: #9a948a;
+      }
+      .status-bubble.thinking .status-line::before,
+      .status-bubble.replying .status-line::before,
+      .status-bubble.tool .status-line::before {
+        background: #2f7d54;
+        animation: pulse 1.2s ease-in-out infinite;
+      }
+      .status-bubble.waiting .status-line::before {
+        background: #b7791f;
+      }
+      .status-bubble.complete .status-line::before {
+        background: #2f7d54;
+      }
+      .status-bubble.error .status-line::before {
+        background: #b42318;
+      }
+      .status-title {
+        display: block;
+        color: #3f3b35;
+        font-weight: 700;
+      }
+      .status-detail {
+        display: block;
+        margin-top: 2px;
+        color: #746f67;
+        white-space: pre-wrap;
+      }
       .bubble-meta {
         color: #7b756d;
         font-size: 11px;
@@ -602,6 +659,8 @@ export const litePageHtml = String.raw`<!doctype html>
         var bubbleByItemId = {};
         var lastAssistantBubble = null;
         var activeAssistantItemId = "";
+        var activeStatusNode = null;
+        var activeStatusBubble = null;
         var historyLoadSeq = 0;
         var threadListRefreshTimer = null;
         var workspaceOpenByKey = readWorkspaceOpenState();
@@ -652,6 +711,7 @@ export const litePageHtml = String.raw`<!doctype html>
           workPanel.className = "work-panel " + (phase || "idle");
           workLabel.textContent = label || "空闲";
           workDetail.textContent = detail || "";
+          updateStatusBubble(phase, label, detail);
         }
 
         function resetActivities() {
@@ -1103,6 +1163,8 @@ export const litePageHtml = String.raw`<!doctype html>
           bubbleByItemId = {};
           lastAssistantBubble = null;
           activeAssistantItemId = "";
+          activeStatusNode = null;
+          activeStatusBubble = null;
         }
 
         function orderedItemsForTurn(turn) {
@@ -1181,9 +1243,11 @@ export const litePageHtml = String.raw`<!doctype html>
           historyLoadSeq++;
           activeAssistantItemId = "";
           lastAssistantBubble = null;
+          activeStatusNode = null;
+          activeStatusBubble = null;
           resetActivities();
-          setWork("thinking", "等待 Codex 开始处理", "请求已发出，正在等待 Codex 事件流。");
           addBubble("user", prompt);
+          setWork("thinking", "Codex 正在思考", "请求已发出，正在等待 Codex 返回实时状态。");
           promptEl.value = "";
           autoSizePrompt();
           show(actionMsg, "正在发送...");
@@ -1217,7 +1281,7 @@ export const litePageHtml = String.raw`<!doctype html>
             currentThreadId = threadId;
             localStorage.setItem("threadId", threadId);
           }
-          setWork("thinking", "等待 Codex 回复", "已发送，等待 Codex 返回实时状态。");
+          setWork("thinking", "Codex 正在思考", "已发送，等待 Codex 返回实时状态。");
           show(actionMsg, "已发送，等待 Codex 回复。");
           scheduleThreadListRefresh(threadId);
         }
@@ -1560,6 +1624,48 @@ export const litePageHtml = String.raw`<!doctype html>
 
         function addSystemBubble(text) {
           addBubble("system", text);
+        }
+
+        function ensureStatusNode() {
+          if (activeStatusNode && activeStatusBubble) {
+            return activeStatusNode;
+          }
+
+          activeStatusNode = addBubble("system", "", "Codex 状态", "codex-status-" + Date.now());
+          activeStatusBubble = activeStatusNode.parentElement;
+          return activeStatusNode;
+        }
+
+        function updateStatusBubble(phase, label, detail) {
+          if (phase === "idle") {
+            return;
+          }
+
+          var node = ensureStatusNode();
+          var cleanPhase = phase || "thinking";
+          if (activeStatusBubble) {
+            activeStatusBubble.className = "bubble system status-bubble " + cleanPhase;
+          }
+          node.innerHTML = "";
+
+          var line = document.createElement("div");
+          line.className = "status-line";
+          var text = document.createElement("div");
+          var title = document.createElement("span");
+          title.className = "status-title";
+          title.textContent = label || "Codex 正在思考";
+          text.appendChild(title);
+
+          if (detail) {
+            var body = document.createElement("span");
+            body.className = "status-detail";
+            body.textContent = detail;
+            text.appendChild(body);
+          }
+
+          line.appendChild(text);
+          node.appendChild(line);
+          scrollChat();
         }
 
         function ensureAssistantNode(itemId) {
