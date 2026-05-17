@@ -435,63 +435,6 @@ export const litePageHtml = String.raw`<!doctype html>
         font-size: 13px;
         max-width: 100%;
       }
-      .bubble.status-bubble {
-        border-left: 4px solid #9a948a;
-      }
-      .bubble.status-bubble.thinking,
-      .bubble.status-bubble.replying,
-      .bubble.status-bubble.tool {
-        border-left-color: #2f7d54;
-      }
-      .bubble.status-bubble.waiting {
-        border-left-color: #b7791f;
-      }
-      .bubble.status-bubble.complete {
-        border-left-color: #2f7d54;
-      }
-      .bubble.status-bubble.error {
-        border-left-color: #b42318;
-      }
-      .status-line {
-        display: grid;
-        grid-template-columns: 10px 1fr;
-        gap: 8px;
-        align-items: start;
-      }
-      .status-line::before {
-        content: "";
-        width: 8px;
-        height: 8px;
-        margin-top: 7px;
-        border-radius: 999px;
-        background: #9a948a;
-      }
-      .status-bubble.thinking .status-line::before,
-      .status-bubble.replying .status-line::before,
-      .status-bubble.tool .status-line::before {
-        background: #2f7d54;
-        animation: pulse 1.2s ease-in-out infinite;
-      }
-      .status-bubble.waiting .status-line::before {
-        background: #b7791f;
-      }
-      .status-bubble.complete .status-line::before {
-        background: #2f7d54;
-      }
-      .status-bubble.error .status-line::before {
-        background: #b42318;
-      }
-      .status-title {
-        display: block;
-        color: #3f3b35;
-        font-weight: 700;
-      }
-      .status-detail {
-        display: block;
-        margin-top: 2px;
-        color: #746f67;
-        white-space: pre-wrap;
-      }
       .bubble-meta {
         color: #7b756d;
         font-size: 11px;
@@ -511,6 +454,74 @@ export const litePageHtml = String.raw`<!doctype html>
       }
       .composer button {
         min-width: 74px;
+      }
+      .bottom-status {
+        grid-column: 1 / -1;
+        display: grid;
+        grid-template-columns: 10px 1fr;
+        gap: 8px;
+        align-items: start;
+        border: 1px solid #dedbd2;
+        border-left: 4px solid #9a948a;
+        border-radius: 9px;
+        background: #fff;
+        color: #5f5a52;
+        padding: 8px 10px;
+        font-size: 13px;
+        box-shadow: 0 5px 18px rgba(0, 0, 0, 0.08);
+      }
+      .bottom-status.hidden {
+        display: none;
+      }
+      .bottom-status::before {
+        content: "";
+        width: 8px;
+        height: 8px;
+        margin-top: 7px;
+        border-radius: 999px;
+        background: #9a948a;
+      }
+      .bottom-status.thinking,
+      .bottom-status.replying,
+      .bottom-status.tool {
+        border-left-color: #2f7d54;
+      }
+      .bottom-status.thinking::before,
+      .bottom-status.replying::before,
+      .bottom-status.tool::before {
+        background: #2f7d54;
+        animation: pulse 1.2s ease-in-out infinite;
+      }
+      .bottom-status.waiting {
+        border-left-color: #b7791f;
+      }
+      .bottom-status.waiting::before {
+        background: #b7791f;
+      }
+      .bottom-status.complete {
+        border-left-color: #2f7d54;
+      }
+      .bottom-status.complete::before {
+        background: #2f7d54;
+      }
+      .bottom-status.error {
+        border-left-color: #b42318;
+      }
+      .bottom-status.error::before {
+        background: #b42318;
+      }
+      .bottom-status-title {
+        display: block;
+        color: #36332e;
+        font-weight: 750;
+      }
+      .bottom-status-detail {
+        display: block;
+        margin-top: 2px;
+        color: #746f67;
+        line-height: 1.35;
+        white-space: pre-wrap;
+        word-break: break-word;
       }
       .bottom-btn {
         position: fixed;
@@ -635,6 +646,12 @@ export const litePageHtml = String.raw`<!doctype html>
         <button id="bottomBtn" type="button" class="bottom-btn hidden">到底部 ↓</button>
 
         <form id="composer" class="composer">
+          <div id="bottomStatus" class="bottom-status hidden">
+            <div>
+              <span id="bottomStatusTitle" class="bottom-status-title">Codex 正在思考</span>
+              <span id="bottomStatusDetail" class="bottom-status-detail">请求已发出，正在等待 Codex 返回实时状态。</span>
+            </div>
+          </div>
           <textarea id="prompt" rows="1" placeholder="发给 Codex 的消息"></textarea>
           <button id="sendBtn" type="submit">发送</button>
         </form>
@@ -659,8 +676,6 @@ export const litePageHtml = String.raw`<!doctype html>
         var bubbleByItemId = {};
         var lastAssistantBubble = null;
         var activeAssistantItemId = "";
-        var activeStatusNode = null;
-        var activeStatusBubble = null;
         var historyLoadSeq = 0;
         var threadListRefreshTimer = null;
         var workspaceOpenByKey = readWorkspaceOpenState();
@@ -685,6 +700,9 @@ export const litePageHtml = String.raw`<!doctype html>
         var workLabel = document.getElementById("workLabel");
         var workDetail = document.getElementById("workDetail");
         var activityList = document.getElementById("activityList");
+        var bottomStatus = document.getElementById("bottomStatus");
+        var bottomStatusTitle = document.getElementById("bottomStatusTitle");
+        var bottomStatusDetail = document.getElementById("bottomStatusDetail");
         var sendBtn = document.getElementById("sendBtn");
         var bottomBtn = document.getElementById("bottomBtn");
 
@@ -711,7 +729,7 @@ export const litePageHtml = String.raw`<!doctype html>
           workPanel.className = "work-panel " + (phase || "idle");
           workLabel.textContent = label || "空闲";
           workDetail.textContent = detail || "";
-          updateStatusBubble(phase, label, detail);
+          updateBottomStatus(phase, label, detail);
         }
 
         function resetActivities() {
@@ -1163,8 +1181,6 @@ export const litePageHtml = String.raw`<!doctype html>
           bubbleByItemId = {};
           lastAssistantBubble = null;
           activeAssistantItemId = "";
-          activeStatusNode = null;
-          activeStatusBubble = null;
         }
 
         function orderedItemsForTurn(turn) {
@@ -1243,8 +1259,6 @@ export const litePageHtml = String.raw`<!doctype html>
           historyLoadSeq++;
           activeAssistantItemId = "";
           lastAssistantBubble = null;
-          activeStatusNode = null;
-          activeStatusBubble = null;
           resetActivities();
           addBubble("user", prompt);
           setWork("thinking", "Codex 正在思考", "请求已发出，正在等待 Codex 返回实时状态。");
@@ -1626,46 +1640,15 @@ export const litePageHtml = String.raw`<!doctype html>
           addBubble("system", text);
         }
 
-        function ensureStatusNode() {
-          if (activeStatusNode && activeStatusBubble) {
-            return activeStatusNode;
-          }
-
-          activeStatusNode = addBubble("system", "", "Codex 状态", "codex-status-" + Date.now());
-          activeStatusBubble = activeStatusNode.parentElement;
-          return activeStatusNode;
-        }
-
-        function updateStatusBubble(phase, label, detail) {
+        function updateBottomStatus(phase, label, detail) {
           if (phase === "idle") {
+            bottomStatus.className = "bottom-status hidden";
             return;
           }
 
-          var node = ensureStatusNode();
-          var cleanPhase = phase || "thinking";
-          if (activeStatusBubble) {
-            activeStatusBubble.className = "bubble system status-bubble " + cleanPhase;
-          }
-          node.innerHTML = "";
-
-          var line = document.createElement("div");
-          line.className = "status-line";
-          var text = document.createElement("div");
-          var title = document.createElement("span");
-          title.className = "status-title";
-          title.textContent = label || "Codex 正在思考";
-          text.appendChild(title);
-
-          if (detail) {
-            var body = document.createElement("span");
-            body.className = "status-detail";
-            body.textContent = detail;
-            text.appendChild(body);
-          }
-
-          line.appendChild(text);
-          node.appendChild(line);
-          scrollChat();
+          bottomStatus.className = "bottom-status " + (phase || "thinking");
+          bottomStatusTitle.textContent = label || "Codex 正在思考";
+          bottomStatusDetail.textContent = detail || "";
         }
 
         function ensureAssistantNode(itemId) {
