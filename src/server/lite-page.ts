@@ -659,9 +659,14 @@ export const litePageHtml = String.raw`<!doctype html>
         var currentThreadCwd = "";
         var bubbleByItemId = {};
         var lastAssistantBubble = null;
+        var lastAssistantItemId = "";
         var activeAssistantItemId = "";
         var historyLoadSeq = 0;
         var threadListRefreshTimer = null;
+        var replySyncTimer = null;
+        var replySyncAttempts = 0;
+        var replySyncBaselineId = "";
+        var replySyncBaselineText = "";
         var workspaceOpenByKey = readWorkspaceOpenState();
 
         var pairingInput = document.getElementById("pairingCode");
@@ -1083,6 +1088,7 @@ export const litePageHtml = String.raw`<!doctype html>
         function resetBubbleTracking() {
           bubbleByItemId = {};
           lastAssistantBubble = null;
+          lastAssistantItemId = "";
           activeAssistantItemId = "";
         }
 
@@ -1160,8 +1166,12 @@ export const litePageHtml = String.raw`<!doctype html>
 
           sendBtn.disabled = true;
           historyLoadSeq++;
+          replySyncBaselineId = lastAssistantItemId || "";
+          replySyncBaselineText = lastAssistantBubble ? lastAssistantBubble.textContent || "" : "";
           activeAssistantItemId = "";
           lastAssistantBubble = null;
+          replySyncAttempts = 0;
+          cancelReplySync();
           resetActivities();
           addBubble("user", prompt);
           setWork("thinking", "Codex 正在思考", "请求已发出，正在等待 Codex 返回实时状态。");
@@ -1198,9 +1208,13 @@ export const litePageHtml = String.raw`<!doctype html>
             currentThreadId = threadId;
             localStorage.setItem("threadId", threadId);
           }
+          var renderedReply = renderLatestAssistantFromResult(res.result);
           setWork("thinking", "Codex 正在思考", "已发送，等待 Codex 返回实时状态。");
-          show(actionMsg, "已发送，等待 Codex 回复。");
+          show(actionMsg, renderedReply ? "已同步 Codex 回复。" : "已发送，等待 Codex 回复。");
           scheduleThreadListRefresh(threadId);
+          if (!renderedReply && threadId) {
+            scheduleReplySync(threadId, 2500);
+          }
         }
 
         function updateWorkActivity(message) {
@@ -1470,6 +1484,7 @@ export const litePageHtml = String.raw`<!doctype html>
           }
 
           if (message.method === "item/agentMessage/delta") {
+            cancelReplySync();
             appendAssistantDelta(params.itemId || params.turnId || "active", params.delta || "");
             return;
           }
@@ -1477,6 +1492,7 @@ export const litePageHtml = String.raw`<!doctype html>
           if (message.method === "item/completed") {
             var item = params.item;
             if (item && item.type === "agentMessage" && item.text) {
+              cancelReplySync();
               setAssistantText(
                 item.id || params.itemId || "completed-" + Date.now(),
                 item.text,
@@ -1499,7 +1515,52 @@ export const litePageHtml = String.raw`<!doctype html>
 
           if (message.method === "turn/completed") {
             show(actionMsg, "Codex 已完成回复。");
+            if (!lastAssistantBubble && currentThreadId) {
+              syncLatestReply(currentThreadId);
+            }
             if (currentThreadId) scheduleThreadListRefresh(currentThreadId);
+          }
+        }
+
+        function scheduleReplySync(threadId, delay) {
+          cancelReplySync();
+          if (!threadId) return;
+          replySyncTimer = setTimeout(function () {
+            replySyncTimer = null;
+            syncLatestReply(threadId);
+          }, delay || 1500);
+        }
+
+        function cancelReplySync() {
+          if (replySyncTimer) {
+            clearTimeout(replySyncTimer);
+            replySyncTimer = null;
+          }
+        }
+
+        function syncLatestReply(threadId) {
+          if (!threadId || threadId !== currentThreadId) return;
+          rpc("thread.read", { threadId: threadId, includeTurns: true }, function (res) {
+            if (!res || !res.ok || threadId !== currentThreadId) {
+              retryReplySync(threadId);
+              return;
+            }
+
+            if (renderLatestAssistantFromResult(res.result)) {
+              cancelReplySync();
+              show(actionMsg, "已同步 Codex 回复。");
+              return;
+            }
+
+            retryReplySync(threadId);
+          });
+        }
+
+        function retryReplySync(threadId) {
+          if (!threadId || threadId !== currentThreadId || lastAssistantBubble) return;
+          replySyncAttempts++;
+          if (replySyncAttempts <= 6) {
+            scheduleReplySync(threadId, 1200 + replySyncAttempts * 700);
           }
         }
 
@@ -1532,7 +1593,10 @@ export const litePageHtml = String.raw`<!doctype html>
 
           if (itemId) {
             bubbleByItemId[itemId] = body;
-            if (role === "assistant") lastAssistantBubble = body;
+            if (role === "assistant") {
+              lastAssistantBubble = body;
+              lastAssistantItemId = itemId;
+            }
           }
           scrollChat();
           updateBottomButton();
@@ -1579,7 +1643,62 @@ export const litePageHtml = String.raw`<!doctype html>
           var node = ensureAssistantNode(itemId);
           node.textContent = text || "";
           activeAssistantItemId = itemId;
+          lastAssistantBubble = node;
+          lastAssistantItemId = itemId;
           scrollChat();
+        }
+
+        function renderLatestAssistantFromResult(result) {
+          var message = latestAssistantMessage(result);
+          if (!message || !message.text) return false;
+          setAssistantText(message.id || "assistant-sync-" + Date.now(), message.text, activeAssistantItemId);
+          setWork("complete", "回复已同步", "已从 Codex 会话记录读取最终回答。");
+          return true;
+        }
+
+        function latestAssistantMessage(value) {
+          var candidates = [];
+          collectAssistantMessages(value, candidates);
+          if (!candidates.length) return null;
+          candidates.sort(function (a, b) {
+            return (b.ts || 0) - (a.ts || 0);
+          });
+          return candidates[0];
+        }
+
+        function collectAssistantMessages(value, out, timestamp) {
+          if (!value) return;
+          if (Array.isArray(value)) {
+            for (var i = 0; i < value.length; i++) {
+              collectAssistantMessages(value[i], out, timestamp);
+            }
+            return;
+          }
+          if (typeof value !== "object") return;
+
+          var ts = timestampFrom(value) || timestamp || 0;
+          if (value.type === "agentMessage" && typeof value.text === "string" && trim(value.text)) {
+            var id = typeof value.id === "string" ? value.id : "";
+            if (id !== replySyncBaselineId || value.text !== replySyncBaselineText) {
+              out.push({
+                id: id,
+                text: value.text,
+                ts: ts
+              });
+            }
+          }
+
+          if (Array.isArray(value.turns)) collectAssistantMessages(value.turns, out, ts);
+          if (Array.isArray(value.data)) collectAssistantMessages(value.data, out, ts);
+          if (Array.isArray(value.items)) collectAssistantMessages(value.items, out, ts);
+          if (value.thread) collectAssistantMessages(value.thread, out, ts);
+          if (value.turn) collectAssistantMessages(value.turn, out, ts);
+        }
+
+        function timestampFrom(value) {
+          if (!value || typeof value !== "object") return 0;
+          var timestamp = value.completedAt || value.startedAt || value.updatedAt || value.createdAt;
+          return typeof timestamp === "number" ? timestamp : 0;
         }
 
         function isServerRequestMethod(method) {
