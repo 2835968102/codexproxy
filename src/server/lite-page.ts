@@ -156,7 +156,7 @@ export const litePageHtml = String.raw`<!doctype html>
         border-radius: 10px;
         background: #fff;
       }
-      .thread-panel summary {
+      .thread-panel > summary {
         display: none;
       }
       .thread-titlebar {
@@ -1536,8 +1536,18 @@ export const litePageHtml = String.raw`<!doctype html>
           if (message.method === "thread/started" && params.thread && params.thread.id && !currentThreadId) {
             currentThreadId = params.thread.id;
             localStorage.setItem("threadId", currentThreadId);
+            currentThreadCwd = params.thread.cwd || currentThreadCwd;
+            if (currentThreadCwd) cwdEl.value = currentThreadCwd;
             updateChatHeader(params.thread);
             return;
+          }
+
+          if (message.method === "item/completed") {
+            var completedItem = params.item;
+            if (completedItem && completedItem.type === "userMessage") {
+              renderRemoteUserMessage(completedItem);
+              return;
+            }
           }
 
           if (message.method === "item/agentMessage/delta") {
@@ -1577,6 +1587,14 @@ export const litePageHtml = String.raw`<!doctype html>
             }
             if (currentThreadId) scheduleThreadListRefresh(currentThreadId);
           }
+        }
+
+        function renderRemoteUserMessage(item) {
+          var itemId = item && item.id ? item.id : "";
+          if (itemId && bubbleByItemId[itemId]) return;
+          var text = userContentToText(item && item.content);
+          if (!text) return;
+          addBubble("user", text, "你 · " + new Date().toLocaleTimeString(), itemId || undefined);
         }
 
         function scheduleReplySync(threadId, delay) {
