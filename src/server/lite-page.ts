@@ -726,6 +726,7 @@ export const litePageHtml = String.raw`<!doctype html>
         var replySyncBaselineText = "";
         var replySyncStartedAt = 0;
         var pendingUserBubble = null;
+        var currentTurnByThread = {};
         var workspaceOpenByKey = readWorkspaceOpenState();
 
         var pairingInput = document.getElementById("pairingCode");
@@ -1174,6 +1175,7 @@ export const litePageHtml = String.raw`<!doctype html>
           resetBubbleTracking();
           chatLog.innerHTML = "";
           var orderedTurns = turns.slice().sort(compareTurns);
+          rememberActiveTurn(thread && thread.id, orderedTurns);
           var count = 0;
           for (var i = 0; i < orderedTurns.length; i++) {
             var items = orderedItemsForTurn(orderedTurns[i]);
@@ -1241,11 +1243,8 @@ export const litePageHtml = String.raw`<!doctype html>
           show(actionMsg, "正在发送...");
 
           if (currentThreadId) {
-            rpc("turn.start", {
-              threadId: currentThreadId,
-              prompt: prompt,
-              cwd: currentThreadCwd || undefined
-            }, afterSend);
+            var request = buildTurnSendRequest(currentThreadId, prompt, currentThreadCwd || undefined);
+            rpc(request.method, request.params, afterSend);
           } else {
             var cwd = trim(cwdEl.value);
             currentThreadCwd = cwd;
@@ -1255,6 +1254,29 @@ export const litePageHtml = String.raw`<!doctype html>
               cwd: cwd || undefined
             }, afterSend);
           }
+        }
+
+        function buildTurnSendRequest(threadId, prompt, cwd) {
+          var activeTurnId = currentTurnByThread[threadId];
+          if (activeTurnId) {
+            return {
+              method: "turn.steer",
+              params: {
+                threadId: threadId,
+                expectedTurnId: activeTurnId,
+                prompt: prompt
+              }
+            };
+          }
+
+          return {
+            method: "turn.start",
+            params: {
+              threadId: threadId,
+              prompt: prompt,
+              cwd: cwd
+            }
+          };
         }
 
         function afterSend(res) {
@@ -1579,6 +1601,11 @@ export const litePageHtml = String.raw`<!doctype html>
               currentThreadId = params.threadId;
               localStorage.setItem("threadId", currentThreadId);
             }
+            var startedThreadId = params.threadId || currentThreadId;
+            var startedTurnId = (params.turn && params.turn.id) || params.turnId;
+            if (startedThreadId && startedTurnId) {
+              currentTurnByThread[startedThreadId] = startedTurnId;
+            }
             lastAssistantBubble = null;
             activeAssistantItemId = "";
             show(actionMsg, "Codex 正在回复...");
@@ -1586,6 +1613,10 @@ export const litePageHtml = String.raw`<!doctype html>
           }
 
           if (message.method === "turn/completed") {
+            var completedThreadId = params.threadId || currentThreadId;
+            if (completedThreadId) {
+              delete currentTurnByThread[completedThreadId];
+            }
             show(actionMsg, "Codex 已完成回复。");
             if (!lastAssistantBubble && currentThreadId) {
               syncLatestReply(currentThreadId);
@@ -2161,6 +2192,60 @@ export const litePageHtml = String.raw`<!doctype html>
             }
           }
           return false;
+        }
+
+        function rememberActiveTurn(threadId, turns) {
+          if (!threadId || !Array.isArray(turns)) return;
+          var activeTurnId = activeTurnIdFromTurns(turns);
+          if (activeTurnId) {
+            currentTurnByThread[threadId] = activeTurnId;
+          } else {
+            delete currentTurnByThread[threadId];
+          }
+        }
+
+        function activeTurnIdFromTurns(turns) {
+          return turns.slice().sort(function (a, b) {
+            return turnTimestamp(b) - turnTimestamp(a);
+          }).map(function (turn) {
+            return isActiveTurn(turn) ? turnId(turn) : "";
+          }).filter(Boolean)[0] || "";
+        }
+
+        function isActiveTurn(turn) {
+          if (!turn || typeof turn !== "object") return false;
+          if (turn.completedAt !== undefined && turn.completedAt !== null) return false;
+          var status = typeof turn.status === "string" ? normalizeTurnStatus(turn.status) : "";
+          return !!status && !isFinishedTurnStatus(status);
+        }
+
+        function turnId(turn) {
+          if (!turn || typeof turn !== "object") return "";
+          return (typeof turn.id === "string" && turn.id) || (typeof turn.turnId === "string" && turn.turnId) || "";
+        }
+
+        function turnTimestamp(turn) {
+          if (!turn || typeof turn !== "object") return 0;
+          return timestampToMs(turn.updatedAt) || timestampToMs(turn.startedAt) || timestampToMs(turn.createdAt) || timestampToMs(turn.completedAt);
+        }
+
+        function timestampToMs(value) {
+          if (typeof value === "number" && isFinite(value)) {
+            return value < 1000000000000 ? value * 1000 : value;
+          }
+          if (typeof value === "string" && value) {
+            var parsed = Date.parse(value);
+            return isNaN(parsed) ? 0 : parsed;
+          }
+          return 0;
+        }
+
+        function normalizeTurnStatus(value) {
+          return String(value || "").replace(/^\\s+|\\s+$/g, "").toLowerCase().replace(/[\\s-]+/g, "_");
+        }
+
+        function isFinishedTurnStatus(status) {
+          return status === "completed" || status === "complete" || status === "succeeded" || status === "success" || status === "failed" || status === "error" || status === "cancelled" || status === "canceled" || status === "interrupted";
         }
 
         function rememberThread(thread) {

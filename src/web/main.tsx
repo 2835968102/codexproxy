@@ -6,6 +6,7 @@ import {
   SessionSummary,
   createEnvelope
 } from "../shared/protocol.js";
+import { activeTurnIdFromTurns, buildTurnSendRequest } from "../shared/turn-routing.js";
 import "./styles.css";
 
 type LogItem = {
@@ -94,6 +95,12 @@ function App() {
   useEffect(() => {
     currentThreadIdRef.current = currentThreadId;
   }, [currentThreadId]);
+
+  useEffect(() => {
+    if (connected && currentThreadId) {
+      void refreshActiveTurn(currentThreadId);
+    }
+  }, [connected, currentThreadId]);
 
   const activeThread = useMemo(
     () => threads.find((thread) => thread.id === currentThreadId),
@@ -656,6 +663,26 @@ function App() {
     }
   }
 
+  async function refreshActiveTurn(threadId: string) {
+    try {
+      const response = await rpc("thread.read", { threadId, includeTurns: true });
+      if (!response.ok) {
+        throw new Error(response.error);
+      }
+
+      const turnId = activeTurnIdFromTurns((response.result as any)?.turns);
+      if (turnId) {
+        currentTurnByThread.current.set(threadId, turnId);
+      } else {
+        currentTurnByThread.current.delete(threadId);
+      }
+      return turnId;
+    } catch (error) {
+      addLog("error", error instanceof Error ? error.message : error);
+      return currentTurnByThread.current.get(threadId);
+    }
+  }
+
   async function sendPrompt(event: FormEvent) {
     event.preventDefault();
     if (!prompt.trim()) {
@@ -676,11 +703,15 @@ function App() {
       let sentThreadId = currentThreadId;
       if (currentThreadId) {
         const selectedThread = threads.find((thread) => thread.id === currentThreadId);
-        const response = await rpc("turn.start", {
+        const activeTurnId =
+          currentTurnByThread.current.get(currentThreadId) ?? (await refreshActiveTurn(currentThreadId));
+        const request = buildTurnSendRequest({
           threadId: currentThreadId,
           prompt: submittedPrompt,
-          cwd: selectedThread?.cwd
+          cwd: selectedThread?.cwd ?? undefined,
+          activeTurnId
         });
+        const response = await rpc(request.method, request.params);
         if (!response.ok) {
           throw new Error(response.error);
         }
@@ -726,6 +757,7 @@ function App() {
     if (nextCwd) {
       setCwd(nextCwd);
     }
+    void refreshActiveTurn(thread.id);
   }
 
   function startThreadInWorkspace(nextCwd: string) {
