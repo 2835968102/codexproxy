@@ -724,6 +724,7 @@ export const litePageHtml = String.raw`<!doctype html>
         var replySyncAttempts = 0;
         var replySyncBaselineId = "";
         var replySyncBaselineText = "";
+        var replySyncStartedAt = 0;
         var workspaceOpenByKey = readWorkspaceOpenState();
 
         var pairingInput = document.getElementById("pairingCode");
@@ -1225,6 +1226,7 @@ export const litePageHtml = String.raw`<!doctype html>
           historyLoadSeq++;
           replySyncBaselineId = lastAssistantItemId || "";
           replySyncBaselineText = lastAssistantBubble ? lastAssistantBubble.textContent || "" : "";
+          replySyncStartedAt = Date.now() - 2000;
           activeAssistantItemId = "";
           lastAssistantBubble = null;
           replySyncAttempts = 0;
@@ -1754,19 +1756,22 @@ export const litePageHtml = String.raw`<!doctype html>
           var ts = timestampFrom(value) || timestamp || 0;
           if (value.type === "agentMessage" && typeof value.text === "string" && trim(value.text)) {
             var id = typeof value.id === "string" ? value.id : "";
-            if (id !== replySyncBaselineId || value.text !== replySyncBaselineText) {
+            var alreadyRendered = id && bubbleByItemId[id] && id !== activeAssistantItemId;
+            var isBaseline = id === replySyncBaselineId && value.text === replySyncBaselineText;
+            var isTooOldForSync = replySyncStartedAt && (!ts || toTimestampMs(ts) < replySyncStartedAt);
+            if (!alreadyRendered && !isBaseline && !isTooOldForSync) {
               out.push({
                 id: id,
                 text: value.text,
-                ts: ts
+                ts: toTimestampMs(ts)
               });
             }
           }
 
-          if (Array.isArray(value.turns)) collectAssistantMessages(value.turns, out, ts);
+          if (Array.isArray(value.turns)) collectAssistantMessages(value.turns, out, 0);
           if (Array.isArray(value.data)) collectAssistantMessages(value.data, out, ts);
           if (Array.isArray(value.items)) collectAssistantMessages(value.items, out, ts);
-          if (value.thread) collectAssistantMessages(value.thread, out, ts);
+          if (value.thread) collectAssistantMessages(value.thread, out, 0);
           if (value.turn) collectAssistantMessages(value.turn, out, ts);
         }
 
@@ -1774,6 +1779,11 @@ export const litePageHtml = String.raw`<!doctype html>
           if (!value || typeof value !== "object") return 0;
           var timestamp = value.completedAt || value.startedAt || value.updatedAt || value.createdAt;
           return typeof timestamp === "number" ? timestamp : 0;
+        }
+
+        function toTimestampMs(value) {
+          if (typeof value !== "number" || !isFinite(value)) return 0;
+          return value < 1000000000000 ? value * 1000 : value;
         }
 
         function isServerRequestMethod(method) {
