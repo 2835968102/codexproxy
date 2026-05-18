@@ -639,6 +639,12 @@ label {
   min-height: 260px;
 }
 
+.chat-shell {
+  position: relative;
+  min-height: 260px;
+  min-width: 0;
+}
+
 .chat-list {
   display: grid;
   align-content: start;
@@ -646,6 +652,18 @@ label {
   overflow: auto;
   padding: 4px 4px 4px 0;
   min-height: 260px;
+  height: 100%;
+}
+
+.chat-bottom-button {
+  position: absolute;
+  right: 14px;
+  bottom: 14px;
+  min-height: 34px;
+  border-color: #2f7d54;
+  background: #2f7d54;
+  color: #fff;
+  box-shadow: 0 10px 24px rgba(32, 35, 31, 0.18);
 }
 
 .chat-row {
@@ -901,8 +919,18 @@ label {
   font-size: 13px;
 }
 
+.event details {
+  margin-top: 6px;
+}
+
+.event summary {
+  cursor: pointer;
+  color: #687064;
+  font-size: 13px;
+}
+
 .event pre {
-  margin: 0;
+  margin: 8px 0 0;
   max-height: 260px;
   overflow: auto;
   white-space: pre-wrap;
@@ -979,9 +1007,14 @@ label {
 
   .chat-panel form button {
     min-height: 44px;
+    width: 100%;
   }
 
   .chat-bubble {
     max-width: 94%;
+  }
+
+  .chat-table {
+    min-width: 300px;
   }
 }

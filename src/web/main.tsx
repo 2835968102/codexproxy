@@ -101,12 +101,16 @@ function App() {
   const [busy, setBusy] = useState(false);
   const [connecting, setConnecting] = useState(false);
   const [connectionMessage, setConnectionMessage] = useState("");
+  const [threadListLoading, setThreadListLoading] = useState(false);
+  const [threadLoading, setThreadLoading] = useState(false);
+  const [showChatBottomButton, setShowChatBottomButton] = useState(false);
 
   const socketRef = useRef<WebSocket | undefined>(undefined);
   const pendingRef = useRef(new Map<string, Pending>());
   const currentTurnByThread = useRef(new Map<string, string>());
   const currentThreadIdRef = useRef(currentThreadId);
   const chatListRef = useRef<HTMLDivElement | null>(null);
+  const chatPinnedRef = useRef(true);
   const promptRef = useRef<HTMLTextAreaElement | null>(null);
   const activeReplyIdRef = useRef<string | undefined>(undefined);
   const retryingWithoutSessionRef = useRef(false);
@@ -123,8 +127,13 @@ function App() {
 
   useEffect(() => {
     const el = chatListRef.current;
-    if (el) {
-      el.scrollTop = el.scrollHeight;
+    if (!el) {
+      return;
+    }
+    if (chatPinnedRef.current) {
+      requestAnimationFrame(() => scrollChatToBottom("auto"));
+    } else if (replies.length) {
+      setShowChatBottomButton(true);
     }
   }, [replies]);
 
@@ -193,6 +202,28 @@ function App() {
       }
       return [{ id, ts, ...seed, detail: shortenText(detail, 1800) }, ...items].slice(0, 60);
     });
+  }
+
+  function scrollChatToBottom(behavior: ScrollBehavior = "smooth") {
+    const el = chatListRef.current;
+    if (!el) {
+      return;
+    }
+    el.scrollTo({ top: el.scrollHeight, behavior });
+    chatPinnedRef.current = true;
+    setShowChatBottomButton(false);
+  }
+
+  function updateChatPinnedState() {
+    const el = chatListRef.current;
+    if (!el) {
+      return;
+    }
+    const pinned = isNearChatBottom(el);
+    chatPinnedRef.current = pinned;
+    if (pinned) {
+      setShowChatBottomButton(false);
+    }
   }
 
   function appendReplyMessage(message: ChatHistoryMessage, fallbackId: string) {
@@ -701,6 +732,7 @@ function App() {
   }
 
   async function refreshThreads(preferredThreadId = currentThreadId) {
+    setThreadListLoading(true);
     try {
       const response = await rpc("thread.list", { limit: 25, archived: false });
       if (!response.ok) {
@@ -717,6 +749,8 @@ function App() {
       }
     } catch (error) {
       addLog("error", error instanceof Error ? error.message : error);
+    } finally {
+      setThreadListLoading(false);
     }
   }
 
@@ -741,6 +775,8 @@ function App() {
   }
 
   async function loadThreadHistory(threadId: string) {
+    setThreadLoading(true);
+    setWork("thinking", "正在加载历史记录", "正在读取这个对话的消息和活动状态。");
     try {
       const response = await rpc("thread.read", { threadId, includeTurns: true });
       if (!response.ok) {
@@ -755,8 +791,12 @@ function App() {
         currentTurnByThread.current.delete(threadId);
       }
       replaceRepliesFromHistory(response.result);
+      setWork("complete", "历史记录已加载", "已切换到选中的对话。");
     } catch (error) {
       addLog("error", error instanceof Error ? error.message : error);
+      setWork("error", "历史加载失败", error instanceof Error ? error.message : String(error));
+    } finally {
+      setThreadLoading(false);
     }
   }
 
@@ -850,12 +890,18 @@ function App() {
   }
 
   async function startNewThread() {
+    chatPinnedRef.current = true;
+    setShowChatBottomButton(false);
+    setThreadLoading(false);
     setCurrentThreadId("");
     setPrompt("");
     setReplies([]);
+    setWork("idle", idleWorkStatus.label, idleWorkStatus.detail);
   }
 
   function selectThread(thread: ThreadSummary) {
+    chatPinnedRef.current = true;
+    setShowChatBottomButton(false);
     setCurrentThreadId(thread.id);
     const nextCwd = normalizeCwd(thread.cwd);
     if (nextCwd) {
@@ -865,10 +911,14 @@ function App() {
   }
 
   function startThreadInWorkspace(nextCwd: string) {
+    chatPinnedRef.current = true;
+    setShowChatBottomButton(false);
+    setThreadLoading(false);
     setCurrentThreadId("");
     setCwd(nextCwd);
     setPrompt("");
     setReplies([]);
+    setWork("idle", idleWorkStatus.label, idleWorkStatus.detail);
   }
 
   function toggleWorkspace(key: string) {
@@ -979,7 +1029,7 @@ function App() {
                   <p>{workspaceGroups.length ? `${workspaceGroups.length} 个文件夹 · ${threads.length} 个对话` : "暂无项目"}</p>
                 </div>
                 <button type="button" className="secondary-button" onClick={() => refreshThreads()}>
-                  刷新
+                  {threadListLoading ? "刷新中" : "刷新"}
                 </button>
               </div>
               <button type="button" className="new-thread" onClick={startNewThread}>
@@ -1056,23 +1106,34 @@ function App() {
                   </div>
                 </div>
 
-                <div className="chat-list" ref={chatListRef}>
-                  {replies.length === 0 ? (
+                <div className="chat-shell">
+                  <div className="chat-list" onScroll={updateChatPinnedState} ref={chatListRef}>
+                    {threadLoading ? (
+                      <article className="chat-empty">
+                        <pre>正在加载历史记录...</pre>
+                      </article>
+                    ) : replies.length === 0 ? (
                     <article className="chat-empty">
                       <pre>等待回复...</pre>
                     </article>
-                  ) : (
-                    replies.map((item) => (
-                      <article key={item.id} className={`chat-row ${item.role}`}>
-                        <div className="chat-bubble">
-                          <header>
-                            <span>{item.kind}</span>
-                            <time>{new Date(item.ts).toLocaleTimeString()}</time>
-                          </header>
-                          <div className="chat-message">{renderChatText(String(item.body ?? ""))}</div>
-                        </div>
-                      </article>
-                    ))
+                    ) : (
+                      replies.map((item) => (
+                        <article key={item.id} className={`chat-row ${item.role}`}>
+                          <div className="chat-bubble">
+                            <header>
+                              <span>{item.kind}</span>
+                              <time>{new Date(item.ts).toLocaleTimeString()}</time>
+                            </header>
+                            <div className="chat-message">{renderChatText(String(item.body ?? ""))}</div>
+                          </div>
+                        </article>
+                      ))
+                    )}
+                  </div>
+                  {showChatBottomButton && (
+                    <button className="chat-bottom-button" onClick={() => scrollChatToBottom()} type="button">
+                      新消息，到底部
+                    </button>
                   )}
                 </div>
 
@@ -1158,7 +1219,10 @@ function App() {
                     <time>{new Date(item.ts).toLocaleTimeString()}</time>
                   </header>
                   <p>{eventSummary(item.body)}</p>
-                  <pre>{JSON.stringify(item.body, null, 2)}</pre>
+                  <details>
+                    <summary>查看 JSON</summary>
+                    <pre>{JSON.stringify(item.body, null, 2)}</pre>
+                  </details>
                 </article>
               ))}
             </div>
@@ -1468,6 +1532,10 @@ function upsertReplyItems(items: ReplyItem[], next: ReplyItem) {
     return updated.slice(-80);
   }
   return [...items, next].slice(-80);
+}
+
+function isNearChatBottom(el: HTMLElement) {
+  return el.scrollHeight - el.scrollTop - el.clientHeight < 140;
 }
 
 function labelForRole(role: ChatHistoryMessage["role"]) {

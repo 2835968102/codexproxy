@@ -958,6 +958,7 @@ export const litePageHtml = String.raw`<!doctype html>
         var replySyncStartedAt = 0;
         var pendingUserBubble = null;
         var activities = [];
+        var chatPinnedToBottom = true;
         var currentTurnByThread = {};
         var workspaceOpenByKey = readWorkspaceOpenState();
 
@@ -2191,7 +2192,7 @@ export const litePageHtml = String.raw`<!doctype html>
               lastAssistantItemId = itemId;
             }
           }
-          scrollChat();
+          maybeScrollChat();
           updateBottomButton();
           return body;
         }
@@ -2229,7 +2230,7 @@ export const litePageHtml = String.raw`<!doctype html>
           var text = (assistantTextByItemId[itemId] || "") + delta;
           assistantTextByItemId[itemId] = text;
           renderMarkdownInto(node, text);
-          scrollChat();
+          maybeScrollChat();
         }
 
         function setAssistantText(itemId, text, fallbackItemId) {
@@ -2249,7 +2250,7 @@ export const litePageHtml = String.raw`<!doctype html>
           activeAssistantItemId = itemId;
           lastAssistantBubble = node;
           lastAssistantItemId = itemId;
-          scrollChat();
+          maybeScrollChat();
         }
 
         function renderMarkdownInto(target, text) {
@@ -3000,7 +3001,20 @@ export const litePageHtml = String.raw`<!doctype html>
           if (empty) empty.parentNode.removeChild(empty);
         }
 
+        function isNearBottom() {
+          return chatLog.scrollHeight - chatLog.scrollTop - chatLog.clientHeight < 140;
+        }
+
+        function maybeScrollChat() {
+          if (chatPinnedToBottom || isNearBottom()) {
+            scrollChat();
+          } else {
+            updateBottomButton();
+          }
+        }
+
         function scrollChat() {
+          chatPinnedToBottom = true;
           chatLog.scrollTo({
             top: chatLog.scrollHeight,
             behavior: "auto"
@@ -3017,6 +3031,7 @@ export const litePageHtml = String.raw`<!doctype html>
 
         function updateBottomButton() {
           var distance = chatLog.scrollHeight - chatLog.scrollTop - chatLog.clientHeight;
+          chatPinnedToBottom = distance < 140;
           bottomBtn.className = distance > 160 ? "bottom-btn" : "bottom-btn hidden";
         }
 
