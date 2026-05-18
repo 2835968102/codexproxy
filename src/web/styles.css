@@ -500,6 +500,80 @@ label {
   min-height: 260px;
 }
 
+.chat-list {
+  display: grid;
+  gap: 10px;
+  max-height: 620px;
+  overflow: auto;
+  padding-right: 4px;
+}
+
+.chat-row {
+  display: flex;
+  min-width: 0;
+}
+
+.chat-row.user {
+  justify-content: flex-end;
+}
+
+.chat-row.assistant,
+.chat-row.system {
+  justify-content: flex-start;
+}
+
+.chat-bubble {
+  max-width: min(760px, 82%);
+  border: 1px solid #e0e5da;
+  border-radius: 8px;
+  padding: 10px 12px;
+  background: #fff;
+  color: #20231f;
+  min-width: 0;
+}
+
+.chat-row.user .chat-bubble {
+  background: #20231f;
+  border-color: #20231f;
+  color: #fff;
+}
+
+.chat-row.system .chat-bubble {
+  background: #f5f6f1;
+  border-left: 4px solid #6a8f7a;
+}
+
+.chat-bubble header {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  color: #687064;
+  font-size: 12px;
+  margin-bottom: 6px;
+}
+
+.chat-row.user .chat-bubble header {
+  color: rgba(255, 255, 255, 0.64);
+}
+
+.chat-bubble pre {
+  margin: 0;
+  white-space: pre-wrap;
+  word-break: break-word;
+  overflow-wrap: anywhere;
+  font: inherit;
+  line-height: 1.5;
+}
+
+.chat-empty pre {
+  margin: 0;
+  color: #687064;
+  background: #f5f6f1;
+  border-radius: 8px;
+  padding: 12px;
+  white-space: pre-wrap;
+}
+
 .event-list {
   display: grid;
   gap: 10px;

@@ -99,6 +99,7 @@ function App() {
   const pendingRef = useRef(new Map<string, Pending>());
   const currentTurnByThread = useRef(new Map<string, string>());
   const currentThreadIdRef = useRef(currentThreadId);
+  const chatListRef = useRef<HTMLDivElement | null>(null);
   const activeReplyIdRef = useRef<string | undefined>(undefined);
   const retryingWithoutSessionRef = useRef(false);
 
@@ -111,6 +112,13 @@ function App() {
       void refreshActiveTurn(currentThreadId);
     }
   }, [connected, currentThreadId]);
+
+  useEffect(() => {
+    const el = chatListRef.current;
+    if (el) {
+      el.scrollTop = el.scrollHeight;
+    }
+  }, [replies]);
 
   const activeThread = useMemo(
     () => threads.find((thread) => thread.id === currentThreadId),
@@ -180,7 +188,10 @@ function App() {
       return;
     }
 
-    const id = message.id || fallbackId;
+    const id = message.role === "assistant" && activeReplyIdRef.current ? activeReplyIdRef.current : message.id || fallbackId;
+    if (message.role === "assistant" && message.id) {
+      activeReplyIdRef.current = message.id;
+    }
     setReplies((items) => upsertReplyItems(items, {
       id,
       ts: timestampToMs(message.timestamp) || Date.now(),
@@ -1068,19 +1079,21 @@ function App() {
                     清空
                   </button>
                 </div>
-                <div className="event-list">
+                <div className="chat-list" ref={chatListRef}>
                   {replies.length === 0 ? (
-                    <article className="event">
+                    <article className="chat-empty">
                       <pre>等待回复...</pre>
                     </article>
                   ) : (
                     replies.map((item) => (
-                      <article key={item.id} className="event">
-                        <header>
-                          <span>{item.kind}</span>
-                          <time>{new Date(item.ts).toLocaleTimeString()}</time>
-                        </header>
-                        <pre>{String(item.body ?? "")}</pre>
+                      <article key={item.id} className={`chat-row ${item.role}`}>
+                        <div className="chat-bubble">
+                          <header>
+                            <span>{item.kind}</span>
+                            <time>{new Date(item.ts).toLocaleTimeString()}</time>
+                          </header>
+                          <pre>{String(item.body ?? "")}</pre>
+                        </div>
                       </article>
                     ))
                   )}
