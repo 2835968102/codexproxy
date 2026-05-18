@@ -826,12 +826,12 @@ export const litePageHtml = String.raw`<!doctype html>
         50% { opacity: 1; transform: scale(1.08); }
         100% { opacity: 0.45; transform: scale(0.9); }
       }
-      @media (max-width: 640px) {
+      @media (max-width: 640px), (pointer: coarse) and (max-width: 1100px) {
         body { overflow-x: hidden; }
         .shell {
           width: 100%;
           min-height: 100dvh;
-          padding-bottom: calc(var(--mobile-safe-bottom) + 8px);
+          padding-bottom: calc(var(--mobile-safe-bottom) + 128px);
         }
         .panel { margin: 12px; }
         .chat-app {
@@ -857,11 +857,20 @@ export const litePageHtml = String.raw`<!doctype html>
         .chat-log {
           padding: 12px;
           min-height: 38dvh;
+          padding-bottom: 96px;
         }
         .composer {
+          position: fixed;
+          left: 12px;
+          right: 12px;
+          bottom: var(--mobile-safe-bottom);
+          z-index: 20;
           grid-template-columns: minmax(0, 1fr) auto;
           margin: 0;
-          padding: 10px 12px var(--mobile-safe-bottom);
+          padding: 10px;
+          border: 1px solid #dedbd2;
+          border-radius: 12px;
+          box-shadow: 0 -10px 28px rgba(0, 0, 0, 0.12);
         }
         .composer textarea {
           min-height: 44px;
@@ -871,7 +880,7 @@ export const litePageHtml = String.raw`<!doctype html>
           min-width: 72px;
           padding: 0 14px;
         }
-        .debug { margin: 0 12px 12px; }
+        .debug { margin: 0 12px calc(var(--mobile-safe-bottom) + 118px); }
         .bubble { max-width: 92%; }
         .bottom-btn {
           right: 14px;
