@@ -6,6 +6,10 @@ export const litePageHtml = String.raw`<!doctype html>
     <title>Codex Proxy Chat</title>
     <style>
       * { box-sizing: border-box; }
+      :root {
+        --mobile-browser-bottom: 0px;
+        --mobile-safe-bottom: max(12px, calc(env(safe-area-inset-bottom) + var(--mobile-browser-bottom)));
+      }
       html, body { min-height: 100%; }
       body {
         margin: 0;
@@ -55,7 +59,7 @@ export const litePageHtml = String.raw`<!doctype html>
       }
       .shell {
         width: min(880px, 100%);
-        min-height: 100vh;
+        min-height: 100dvh;
         margin: 0 auto;
         display: flex;
         flex-direction: column;
@@ -701,14 +705,14 @@ export const litePageHtml = String.raw`<!doctype html>
       }
       .composer {
         position: sticky;
-        bottom: 0;
+        bottom: var(--mobile-browser-bottom);
         z-index: 3;
         grid-area: composer;
         display: grid;
         grid-template-columns: 1fr auto;
         gap: 8px;
         align-items: end;
-        padding: 10px 14px max(10px, env(safe-area-inset-bottom));
+        padding: 10px 14px var(--mobile-safe-bottom);
         background: rgba(245, 244, 239, 0.98);
         border-top: 1px solid #dedbd2;
       }
@@ -786,7 +790,7 @@ export const litePageHtml = String.raw`<!doctype html>
       .bottom-btn {
         position: fixed;
         right: max(16px, calc((100vw - 880px) / 2 + 16px));
-        bottom: calc(74px + env(safe-area-inset-bottom));
+        bottom: calc(74px + var(--mobile-safe-bottom));
         z-index: 5;
         min-height: 38px;
         border-color: #2f7d54;
@@ -823,7 +827,12 @@ export const litePageHtml = String.raw`<!doctype html>
         100% { opacity: 0.45; transform: scale(0.9); }
       }
       @media (max-width: 640px) {
-        .shell { width: 100%; }
+        body { overflow-x: hidden; }
+        .shell {
+          width: 100%;
+          min-height: 100dvh;
+          padding-bottom: calc(var(--mobile-safe-bottom) + 8px);
+        }
         .panel { margin: 12px; }
         .chat-app {
           display: flex;
@@ -845,12 +854,28 @@ export const litePageHtml = String.raw`<!doctype html>
         .chat-head { margin: 8px 12px 0; }
         .work-panel { margin: 8px 12px 0; }
         .activity-list { margin: 0 12px; }
-        .chat-log { padding: 12px; }
+        .chat-log {
+          padding: 12px;
+          min-height: 38dvh;
+        }
+        .composer {
+          grid-template-columns: minmax(0, 1fr) auto;
+          margin: 0;
+          padding: 10px 12px var(--mobile-safe-bottom);
+        }
+        .composer textarea {
+          min-height: 44px;
+          max-height: 30dvh;
+        }
+        .composer button {
+          min-width: 72px;
+          padding: 0 14px;
+        }
         .debug { margin: 0 12px 12px; }
         .bubble { max-width: 92%; }
         .bottom-btn {
           right: 14px;
-          bottom: calc(78px + env(safe-area-inset-bottom));
+          bottom: calc(78px + var(--mobile-safe-bottom));
         }
       }
     </style>
@@ -936,6 +961,18 @@ export const litePageHtml = String.raw`<!doctype html>
 
     <script>
       (function () {
+        function updateMobileViewportVars() {
+          var viewport = window.visualViewport;
+          var bottomInset = viewport ? Math.max(0, window.innerHeight - viewport.height - viewport.offsetTop) : 0;
+          document.documentElement.style.setProperty("--mobile-browser-bottom", Math.round(bottomInset) + "px");
+        }
+        updateMobileViewportVars();
+        if (window.visualViewport) {
+          window.visualViewport.addEventListener("resize", updateMobileViewportVars);
+          window.visualViewport.addEventListener("scroll", updateMobileViewportVars);
+        }
+        window.addEventListener("orientationchange", updateMobileViewportVars);
+
         var ws = null;
         var seq = 1;
         var pending = {};

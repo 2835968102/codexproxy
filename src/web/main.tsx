@@ -15,6 +15,8 @@ import {
 import { activeTurnIdFromTurns, buildTurnSendRequest } from "../shared/turn-routing.js";
 import "./styles.css";
 
+installMobileViewportVars();
+
 type LogItem = {
   id: string;
   ts: number;
@@ -80,6 +82,18 @@ const idleWorkStatus: WorkStatus = {
   label: "空闲",
   detail: "发送消息后会显示 Codex 的实时状态。"
 };
+
+function installMobileViewportVars() {
+  const update = () => {
+    const viewport = window.visualViewport;
+    const bottomInset = viewport ? Math.max(0, window.innerHeight - viewport.height - viewport.offsetTop) : 0;
+    document.documentElement.style.setProperty("--mobile-browser-bottom", `${Math.round(bottomInset)}px`);
+  };
+  update();
+  window.visualViewport?.addEventListener("resize", update);
+  window.visualViewport?.addEventListener("scroll", update);
+  window.addEventListener("orientationchange", update);
+}
 
 function App() {
   const [pairingCode, setPairingCode] = useState(localStorage.getItem("pairingCode") ?? "");
