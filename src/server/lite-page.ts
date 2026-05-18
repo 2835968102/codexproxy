@@ -853,10 +853,13 @@ export const litePageHtml = String.raw`<!doctype html>
         .workspace-count { display: none; }
         .chat-head { margin: 8px 12px 0; }
         .work-panel { margin: 8px 12px 0; }
-        .activity-list { margin: 0 12px; }
+        .activity-list,
+        .debug {
+          display: none;
+        }
         .chat-log {
           padding: 12px;
-          min-height: 38dvh;
+          min-height: calc(100dvh - 260px);
           padding-bottom: 96px;
         }
         .composer {
@@ -880,7 +883,6 @@ export const litePageHtml = String.raw`<!doctype html>
           min-width: 72px;
           padding: 0 14px;
         }
-        .debug { margin: 0 12px calc(var(--mobile-safe-bottom) + 118px); }
         .bubble { max-width: 92%; }
         .bottom-btn {
           right: 14px;

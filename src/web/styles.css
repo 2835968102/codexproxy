@@ -1010,6 +1010,11 @@ label {
     padding-bottom: 116px;
   }
 
+  .activity-panel,
+  .events {
+    display: none;
+  }
+
   .chat-panel form {
     position: fixed;
     left: 12px;
