@@ -539,6 +539,7 @@ export const litePageHtml = String.raw`<!doctype html>
         margin: 0;
         overflow: auto;
         white-space: pre;
+        background: #121512;
         color: #f4f6ef;
         padding: 10px;
         font: 12px/1.55 Consolas, ui-monospace, monospace;
