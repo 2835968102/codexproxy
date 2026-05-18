@@ -1582,6 +1582,7 @@ export const litePageHtml = String.raw`<!doctype html>
           if (!thread) return;
           var changedThread = currentThreadId !== threadId;
 
+          pinChatToBottom();
           currentThreadId = threadId;
           currentThreadCwd = thread.cwd || "";
           localStorage.setItem("threadId", threadId);
@@ -1598,6 +1599,7 @@ export const litePageHtml = String.raw`<!doctype html>
         }
 
         function startNewThread(focusPrompt) {
+          pinChatToBottom();
           currentThreadId = "";
           currentThreadCwd = trim(cwdEl.value);
           localStorage.removeItem("threadId");
@@ -1620,6 +1622,7 @@ export const litePageHtml = String.raw`<!doctype html>
         }
 
         function loadThreadHistory(threadId) {
+          pinChatToBottom();
           var loadId = ++historyLoadSeq;
           renderEmpty("正在加载历史记录...");
           show(actionMsg, "正在加载对话历史...");
@@ -1694,6 +1697,7 @@ export const litePageHtml = String.raw`<!doctype html>
         }
 
         function renderHistory(thread, turns) {
+          pinChatToBottom();
           resetBubbleTracking();
           chatLog.innerHTML = "";
           var orderedTurns = turns.slice().sort(compareTurns);
@@ -3059,8 +3063,13 @@ export const litePageHtml = String.raw`<!doctype html>
           }
         }
 
-        function scrollChat() {
+        function pinChatToBottom() {
           chatPinnedToBottom = true;
+          bottomBtn.className = "bottom-btn hidden";
+        }
+
+        function scrollChat() {
+          pinChatToBottom();
           chatLog.scrollTo({
             top: chatLog.scrollHeight,
             behavior: "auto"
@@ -3068,11 +3077,19 @@ export const litePageHtml = String.raw`<!doctype html>
           requestAnimationFrame(function () {
             chatLog.scrollTop = chatLog.scrollHeight;
             updateBottomButton();
+            requestAnimationFrame(function () {
+              chatLog.scrollTop = chatLog.scrollHeight;
+              updateBottomButton();
+            });
           });
           setTimeout(function () {
             chatLog.scrollTop = chatLog.scrollHeight;
             updateBottomButton();
           }, 50);
+          setTimeout(function () {
+            chatLog.scrollTop = chatLog.scrollHeight;
+            updateBottomButton();
+          }, 220);
         }
 
         function updateBottomButton() {

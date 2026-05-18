@@ -145,11 +145,11 @@ function App() {
       return;
     }
     if (chatPinnedRef.current) {
-      requestAnimationFrame(() => scrollChatToBottom("auto"));
+      scrollChatToBottomAfterLayout("auto");
     } else if (replies.length) {
       setShowChatBottomButton(true);
     }
-  }, [replies]);
+  }, [replies, threadLoading]);
 
   useEffect(() => {
     resizePrompt();
@@ -218,14 +218,28 @@ function App() {
     });
   }
 
+  function pinChatToBottom() {
+    chatPinnedRef.current = true;
+    setShowChatBottomButton(false);
+  }
+
   function scrollChatToBottom(behavior: ScrollBehavior = "smooth") {
     const el = chatListRef.current;
     if (!el) {
       return;
     }
+    pinChatToBottom();
     el.scrollTo({ top: el.scrollHeight, behavior });
-    chatPinnedRef.current = true;
-    setShowChatBottomButton(false);
+  }
+
+  function scrollChatToBottomAfterLayout(behavior: ScrollBehavior = "smooth") {
+    pinChatToBottom();
+    requestAnimationFrame(() => {
+      scrollChatToBottom(behavior);
+      requestAnimationFrame(() => scrollChatToBottom("auto"));
+    });
+    window.setTimeout(() => scrollChatToBottom("auto"), 80);
+    window.setTimeout(() => scrollChatToBottom("auto"), 220);
   }
 
   function updateChatPinnedState() {
@@ -260,6 +274,7 @@ function App() {
 
   function replaceRepliesFromHistory(thread: unknown) {
     const messages = messagesFromThreadHistory(thread);
+    pinChatToBottom();
     setReplies(
       messages
         .map((message, index) => ({
@@ -332,7 +347,7 @@ function App() {
       setSelectedSession(payload.sessionId);
       localStorage.setItem("sessionId", payload.sessionId);
       addLog("system", "已连接服务器");
-      void refreshThreads();
+      void refreshThreads(undefined, { loadHistory: true });
       return;
     }
 
@@ -745,7 +760,10 @@ function App() {
     });
   }
 
-  async function refreshThreads(preferredThreadId = currentThreadId) {
+  async function refreshThreads(
+    preferredThreadId = currentThreadId,
+    options: { loadHistory?: boolean } = {}
+  ) {
     setThreadListLoading(true);
     try {
       const response = await rpc("thread.list", { limit: 25, archived: false });
@@ -756,10 +774,17 @@ function App() {
       const result = response.result as any;
       const list = result?.threads ?? result?.items ?? result?.data ?? result ?? [];
       setThreads(Array.isArray(list) ? (list as ThreadSummary[]) : []);
+      let selectedThreadId = "";
       if (preferredThreadId) {
         setCurrentThreadId(preferredThreadId);
+        selectedThreadId = preferredThreadId;
       } else if (Array.isArray(list) && list[0]?.id) {
         setCurrentThreadId(list[0].id);
+        selectedThreadId = list[0].id;
+      }
+      if (options.loadHistory && selectedThreadId) {
+        pinChatToBottom();
+        void loadThreadHistory(selectedThreadId);
       }
     } catch (error) {
       addLog("error", error instanceof Error ? error.message : error);
@@ -789,6 +814,7 @@ function App() {
   }
 
   async function loadThreadHistory(threadId: string) {
+    pinChatToBottom();
     setThreadLoading(true);
     setWork("thinking", "正在加载历史记录", "正在读取这个对话的消息和活动状态。");
     try {
@@ -805,6 +831,7 @@ function App() {
         currentTurnByThread.current.delete(threadId);
       }
       replaceRepliesFromHistory(response.result);
+      scrollChatToBottomAfterLayout("auto");
       setWork("complete", "历史记录已加载", "已切换到选中的对话。");
     } catch (error) {
       addLog("error", error instanceof Error ? error.message : error);
@@ -904,8 +931,7 @@ function App() {
   }
 
   async function startNewThread() {
-    chatPinnedRef.current = true;
-    setShowChatBottomButton(false);
+    pinChatToBottom();
     setThreadLoading(false);
     setCurrentThreadId("");
     setPrompt("");
@@ -914,8 +940,7 @@ function App() {
   }
 
   function selectThread(thread: ThreadSummary) {
-    chatPinnedRef.current = true;
-    setShowChatBottomButton(false);
+    pinChatToBottom();
     setCurrentThreadId(thread.id);
     const nextCwd = normalizeCwd(thread.cwd);
     if (nextCwd) {
@@ -925,8 +950,7 @@ function App() {
   }
 
   function startThreadInWorkspace(nextCwd: string) {
-    chatPinnedRef.current = true;
-    setShowChatBottomButton(false);
+    pinChatToBottom();
     setThreadLoading(false);
     setCurrentThreadId("");
     setCwd(nextCwd);
