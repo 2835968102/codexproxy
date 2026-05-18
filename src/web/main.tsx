@@ -40,6 +40,22 @@ type Pending = {
   reject: (error: Error) => void;
 };
 
+type ThreadSummary = {
+  id: string;
+  name?: string | null;
+  preview?: string | null;
+  cwd?: string | null;
+  createdAt?: number | string | null;
+  updatedAt?: number | string | null;
+};
+
+type WorkspaceGroup = {
+  key: string;
+  cwd: string;
+  name: string;
+  threads: ThreadSummary[];
+};
+
 const requestTimeoutMs = 120000;
 const idleWorkStatus: WorkStatus = {
   phase: "idle",
@@ -57,10 +73,13 @@ function App() {
   const [replies, setReplies] = useState<LogItem[]>([]);
   const [activities, setActivities] = useState<ActivityItem[]>([]);
   const [workStatus, setWorkStatus] = useState<WorkStatus>(idleWorkStatus);
-  const [threads, setThreads] = useState<any[]>([]);
+  const [threads, setThreads] = useState<ThreadSummary[]>([]);
   const [currentThreadId, setCurrentThreadId] = useState("");
   const [prompt, setPrompt] = useState("");
   const [cwd, setCwd] = useState("");
+  const [workspaceOpenByKey, setWorkspaceOpenByKey] = useState<Record<string, boolean>>(() =>
+    readWorkspaceOpenState()
+  );
   const [busy, setBusy] = useState(false);
   const [connecting, setConnecting] = useState(false);
   const [connectionMessage, setConnectionMessage] = useState("");
@@ -80,6 +99,11 @@ function App() {
     () => threads.find((thread) => thread.id === currentThreadId),
     [threads, currentThreadId]
   );
+  const workspaceGroups = useMemo(() => groupThreadsByCwd(threads), [threads]);
+  const currentTitle = currentThreadId ? threadTitle(activeThread) : "新线程";
+  const currentSubtitle = currentThreadId
+    ? normalizeCwd(activeThread?.cwd) || "未设置工作目录"
+    : cwd.trim() || "选择项目或输入工作目录后发送第一条消息";
 
   function addLog(kind: string, body: unknown) {
     setLogs((items) =>
@@ -621,7 +645,7 @@ function App() {
 
       const result = response.result as any;
       const list = result?.threads ?? result?.items ?? result?.data ?? result ?? [];
-      setThreads(Array.isArray(list) ? list : []);
+      setThreads(Array.isArray(list) ? (list as ThreadSummary[]) : []);
       if (preferredThreadId) {
         setCurrentThreadId(preferredThreadId);
       } else if (Array.isArray(list) && list[0]?.id) {
@@ -694,6 +718,28 @@ function App() {
   async function startNewThread() {
     setCurrentThreadId("");
     setPrompt("");
+  }
+
+  function selectThread(thread: ThreadSummary) {
+    setCurrentThreadId(thread.id);
+    const nextCwd = normalizeCwd(thread.cwd);
+    if (nextCwd) {
+      setCwd(nextCwd);
+    }
+  }
+
+  function startThreadInWorkspace(nextCwd: string) {
+    setCurrentThreadId("");
+    setCwd(nextCwd);
+    setPrompt("");
+  }
+
+  function toggleWorkspace(key: string) {
+    setWorkspaceOpenByKey((current) => {
+      const next = { ...current, [key]: current[key] === false };
+      saveWorkspaceOpenState(next);
+      return next;
+    });
   }
 
   async function interruptTurn() {
@@ -789,121 +835,169 @@ function App() {
           </section>
 
           <section className="grid">
-            <aside className="panel threads">
-              <div className="panel-head">
-                <h2>线程</h2>
-                <button type="button" onClick={() => refreshThreads()}>
+            <aside className="sidebar">
+              <div className="sidebar-head">
+                <div>
+                  <h2>项目</h2>
+                  <p>{workspaceGroups.length ? `${workspaceGroups.length} 个文件夹 · ${threads.length} 个对话` : "暂无项目"}</p>
+                </div>
+                <button type="button" className="secondary-button" onClick={() => refreshThreads()}>
                   刷新
                 </button>
               </div>
               <button type="button" className="new-thread" onClick={startNewThread}>
                 新线程
               </button>
-              <div className="thread-list">
-                {threads.map((thread) => (
-                  <button
-                    type="button"
-                    key={thread.id}
-                    className={thread.id === currentThreadId ? "thread selected" : "thread"}
-                    onClick={() => setCurrentThreadId(thread.id)}
-                  >
-                    <strong>{thread.name || thread.preview || "Untitled"}</strong>
-                    <span>{thread.cwd}</span>
-                  </button>
-                ))}
+              <div className="workspace-list">
+                {workspaceGroups.length === 0 ? (
+                  <div className="empty-state">
+                    还没有历史对话。输入工作目录并发送消息后，这里会按项目自动归档。
+                  </div>
+                ) : (
+                  workspaceGroups.map((group) => {
+                    const isOpen =
+                      group.threads.some((thread) => thread.id === currentThreadId) ||
+                      workspaceOpenByKey[group.key] !== false;
+                    return (
+                      <section className="workspace-group" key={group.key}>
+                        <button
+                          type="button"
+                          className="workspace-toggle"
+                          aria-expanded={isOpen}
+                          onClick={() => toggleWorkspace(group.key)}
+                        >
+                          <span className="workspace-chevron">›</span>
+                          <span className="workspace-title">
+                            <strong>{group.name}</strong>
+                            <span>{group.cwd || "未设置工作目录"}</span>
+                          </span>
+                          <span className="workspace-count">{group.threads.length}</span>
+                        </button>
+                        {isOpen && (
+                          <div className="thread-list">
+                            {group.threads.map((thread) => (
+                              <button
+                                type="button"
+                                key={thread.id}
+                                className={thread.id === currentThreadId ? "thread selected" : "thread"}
+                                onClick={() => selectThread(thread)}
+                              >
+                                <strong>{threadTitle(thread)}</strong>
+                                <span>{formatThreadTime(thread)}</span>
+                              </button>
+                            ))}
+                            <button
+                              type="button"
+                              className="workspace-new"
+                              onClick={() => startThreadInWorkspace(group.cwd)}
+                            >
+                              在此项目新建
+                            </button>
+                          </div>
+                        )}
+                      </section>
+                    );
+                  })
+                )}
               </div>
             </aside>
 
-          <section className="panel composer">
-              <div className="panel-head">
-                <h2>{currentThreadId ? activeThread?.name || activeThread?.preview || "继续线程" : "新线程"}</h2>
-                <button type="button" onClick={interruptTurn}>
-                  打断
-                </button>
-              </div>
-              {!currentThreadId && (
-                <label>
-                  工作目录
-                  <input
-                    value={cwd}
-                    onChange={(event) => setCwd(event.target.value)}
-                    placeholder="例如 D:\\PROJECT\\CODE\\your-repo"
-                  />
-                </label>
-              )}
-              <form onSubmit={sendPrompt}>
-                <textarea
-                  value={prompt}
-                  onChange={(event) => setPrompt(event.target.value)}
-                  placeholder="发给 Codex 的消息"
-                  rows={8}
-                />
-                <button type="submit" disabled={busy || !prompt.trim()}>
-                  {busy ? "发送中" : "发送"}
-                </button>
-              </form>
-              <div className="approval-row">
-                <button type="button" onClick={() => approveLatest("accept")}>
-                  同意最新审批
-                </button>
-                <button type="button" onClick={() => approveLatest("decline")}>
-                  拒绝
-                </button>
-              </div>
-              <div className={`work-status ${workStatus.phase}`}>
-                <span />
-                <div>
-                  <strong>{workStatus.label}</strong>
-                  {workStatus.detail && <p>{workStatus.detail}</p>}
+            <section className="workspace-main">
+              <section className="panel composer">
+                <div className="composer-head">
+                  <div>
+                    <h2>{currentTitle}</h2>
+                    <p>{currentSubtitle}</p>
+                  </div>
+                  <button type="button" className="secondary-button" onClick={interruptTurn}>
+                    打断
+                  </button>
                 </div>
-              </div>
-              <div className="activity-list">
-                {activities.length === 0 ? (
-                  <article className="activity-item empty">
-                    <strong>暂无活动</strong>
-                    <p>发送消息后，这里会显示思考、计划、工具调用和审批状态。</p>
-                  </article>
-                ) : (
-                  activities.map((item) => (
-                    <article key={item.id} className={`activity-item ${item.state}`}>
-                      <header>
-                        <span>{item.kind}</span>
-                        <time>{new Date(item.ts).toLocaleTimeString()}</time>
-                      </header>
-                      <strong>{item.title}</strong>
-                      {item.detail && <pre>{item.detail}</pre>}
-                    </article>
-                  ))
-                )}
-              </div>
-          </section>
 
-          <section className="panel events">
-            <div className="panel-head">
-              <h2>对话</h2>
-              <button type="button" onClick={() => setReplies([])}>
-                清空
-              </button>
-            </div>
-            <div className="event-list">
-              {replies.length === 0 ? (
-                <article className="event">
-                  <pre>等待回复...</pre>
-                </article>
-              ) : (
-                replies.map((item) => (
-                  <article key={item.id} className="event">
-                    <header>
-                      <span>{item.kind}</span>
-                      <time>{new Date(item.ts).toLocaleTimeString()}</time>
-                    </header>
-                    <pre>{String(item.body ?? "")}</pre>
-                  </article>
-                ))
-              )}
-            </div>
+                {!currentThreadId && (
+                  <label>
+                    工作目录
+                    <input
+                      value={cwd}
+                      onChange={(event) => setCwd(event.target.value)}
+                      placeholder="例如 D:\\PROJECT\\CODE\\your-repo"
+                    />
+                  </label>
+                )}
+                <form onSubmit={sendPrompt}>
+                  <textarea
+                    value={prompt}
+                    onChange={(event) => setPrompt(event.target.value)}
+                    placeholder="发给 Codex 的消息"
+                    rows={8}
+                  />
+                  <button type="submit" disabled={busy || !prompt.trim()}>
+                    {busy ? "发送中" : "发送"}
+                  </button>
+                </form>
+                <div className="approval-row">
+                  <button type="button" onClick={() => approveLatest("accept")}>
+                    同意最新审批
+                  </button>
+                  <button type="button" onClick={() => approveLatest("decline")}>
+                    拒绝
+                  </button>
+                </div>
+                <div className={`work-status ${workStatus.phase}`}>
+                  <span />
+                  <div>
+                    <strong>{workStatus.label}</strong>
+                    {workStatus.detail && <p>{workStatus.detail}</p>}
+                  </div>
+                </div>
+                <div className="activity-list">
+                  {activities.length === 0 ? (
+                    <article className="activity-item empty">
+                      <strong>暂无活动</strong>
+                      <p>发送消息后，这里会显示思考、计划、工具调用和审批状态。</p>
+                    </article>
+                  ) : (
+                    activities.map((item) => (
+                      <article key={item.id} className={`activity-item ${item.state}`}>
+                        <header>
+                          <span>{item.kind}</span>
+                          <time>{new Date(item.ts).toLocaleTimeString()}</time>
+                        </header>
+                        <strong>{item.title}</strong>
+                        {item.detail && <pre>{item.detail}</pre>}
+                      </article>
+                    ))
+                  )}
+                </div>
+              </section>
+
+              <section className="panel events">
+                <div className="panel-head">
+                  <h2>对话</h2>
+                  <button type="button" onClick={() => setReplies([])}>
+                    清空
+                  </button>
+                </div>
+                <div className="event-list">
+                  {replies.length === 0 ? (
+                    <article className="event">
+                      <pre>等待回复...</pre>
+                    </article>
+                  ) : (
+                    replies.map((item) => (
+                      <article key={item.id} className="event">
+                        <header>
+                          <span>{item.kind}</span>
+                          <time>{new Date(item.ts).toLocaleTimeString()}</time>
+                        </header>
+                        <pre>{String(item.body ?? "")}</pre>
+                      </article>
+                    ))
+                  )}
+                </div>
+              </section>
+            </section>
           </section>
-        </section>
 
           <section className="panel events">
             <div className="panel-head">
@@ -1153,6 +1247,85 @@ function currentPlanStep(plan: unknown) {
   }
   const current = plan.find((step: any) => step?.status === "inProgress");
   return current?.step ? String(current.step) : undefined;
+}
+
+function groupThreadsByCwd(list: ThreadSummary[]): WorkspaceGroup[] {
+  const map = new Map<string, WorkspaceGroup>();
+  for (const thread of list) {
+    const cwd = normalizeCwd(thread.cwd);
+    const key = workspaceKey(cwd);
+    const existing = map.get(key);
+    if (existing) {
+      existing.threads.push(thread);
+    } else {
+      map.set(key, {
+        key,
+        cwd,
+        name: workspaceName(cwd),
+        threads: [thread]
+      });
+    }
+  }
+
+  return [...map.values()].map((group) => ({
+    ...group,
+    threads: group.threads.slice().sort(compareThreadsByUpdatedAt)
+  }));
+}
+
+function compareThreadsByUpdatedAt(a: ThreadSummary, b: ThreadSummary) {
+  return timestampToMs(b.updatedAt ?? b.createdAt) - timestampToMs(a.updatedAt ?? a.createdAt);
+}
+
+function normalizeCwd(cwd: unknown) {
+  return typeof cwd === "string" ? cwd.trim() : "";
+}
+
+function workspaceName(cwd: string) {
+  if (!cwd) {
+    return "未设置工作目录";
+  }
+  const clean = cwd.replace(/[\\/]+$/, "");
+  const parts = clean.split(/[\\/]/);
+  return parts.at(-1) || clean;
+}
+
+function workspaceKey(cwd: string) {
+  return cwd || "__none__";
+}
+
+function threadTitle(thread: ThreadSummary | undefined) {
+  return thread?.name || thread?.preview || thread?.id || "未命名对话";
+}
+
+function formatThreadTime(thread: ThreadSummary) {
+  const value = thread.updatedAt ?? thread.createdAt;
+  const ms = timestampToMs(value);
+  return ms ? new Date(ms).toLocaleString() : "无时间信息";
+}
+
+function timestampToMs(value: unknown) {
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return value < 1000000000000 ? value * 1000 : value;
+  }
+  if (typeof value === "string" && value.trim()) {
+    const parsed = Date.parse(value);
+    return Number.isNaN(parsed) ? 0 : parsed;
+  }
+  return 0;
+}
+
+function readWorkspaceOpenState(): Record<string, boolean> {
+  try {
+    const value = JSON.parse(localStorage.getItem("workspaceOpenByKey") || "{}");
+    return value && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, boolean>) : {};
+  } catch {
+    return {};
+  }
+}
+
+function saveWorkspaceOpenState(value: Record<string, boolean>) {
+  localStorage.setItem("workspaceOpenByKey", JSON.stringify(value));
 }
 
 function formatCommandItem(item: any) {
