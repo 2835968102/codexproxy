@@ -523,16 +523,116 @@ label {
   line-height: 1.45;
 }
 
-.activity-item pre {
+.activity-detail-blocks {
+  display: grid;
+  gap: 8px;
   margin: 8px 0 0;
+}
+
+.activity-text {
+  padding: 8px;
+  border-radius: 6px;
+  background: #f5f6f1;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.activity-command,
+.activity-tool,
+.activity-plan {
+  display: grid;
+  gap: 7px;
+}
+
+.activity-kv {
+  display: grid;
+  grid-template-columns: 56px minmax(0, 1fr);
+  gap: 8px;
+  align-items: start;
+  color: #687064;
+  font-size: 12px;
+}
+
+.activity-kv code,
+.activity-file-list code {
+  min-width: 0;
+  color: #20231f;
+  background: #f5f6f1;
+  border-radius: 5px;
+  padding: 2px 5px;
+  word-break: break-word;
+}
+
+.activity-output {
+  margin: 0;
   max-height: 160px;
   overflow: auto;
   white-space: pre-wrap;
   word-break: break-word;
-  background: #f5f6f1;
+  color: #f4f6ef;
+  background: #121512;
   border-radius: 6px;
   padding: 8px;
   font-size: 12px;
+  font-family: Consolas, "SFMono-Regular", ui-monospace, monospace;
+}
+
+.activity-file-list,
+.activity-plan ol {
+  display: grid;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.activity-file-list li {
+  display: grid;
+  grid-template-columns: 58px minmax(0, 1fr);
+  gap: 8px;
+  align-items: start;
+}
+
+.activity-file-list span {
+  color: #687064;
+  font-size: 12px;
+}
+
+.plan-step {
+  position: relative;
+  padding-left: 18px;
+  color: #3d453a;
+  line-height: 1.45;
+}
+
+.plan-step::before {
+  content: "";
+  position: absolute;
+  left: 2px;
+  top: 0.55em;
+  width: 7px;
+  height: 7px;
+  border-radius: 999px;
+  background: #a7b1a0;
+}
+
+.plan-step.done::before {
+  background: #6a8f7a;
+}
+
+.plan-step.running::before {
+  background: #2f7d54;
+}
+
+.plan-step.waiting::before {
+  background: #b7791f;
+}
+
+.activity-error {
+  color: #b42318;
+  background: #fff1f0;
+  border-radius: 6px;
+  padding: 7px;
 }
 
 .events {
@@ -793,6 +893,12 @@ label {
   color: #687064;
   font-size: 13px;
   margin-bottom: 6px;
+}
+
+.event p {
+  margin: 0 0 8px;
+  color: #3d453a;
+  font-size: 13px;
 }
 
 .event pre {

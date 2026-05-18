@@ -138,6 +138,7 @@ export const litePageHtml = String.raw`<!doctype html>
         grid-template-areas:
           "sidebar chatHead"
           "sidebar work"
+          "sidebar activity"
           "sidebar chatLog"
           "sidebar composer"
           "sidebar debug";
@@ -364,7 +365,8 @@ export const litePageHtml = String.raw`<!doctype html>
         white-space: pre-wrap;
       }
       .activity-list {
-        display: none;
+        grid-area: activity;
+        display: grid;
         gap: 8px;
         max-height: 220px;
         overflow-y: auto;
@@ -418,6 +420,81 @@ export const litePageHtml = String.raw`<!doctype html>
         word-break: break-word;
         max-height: 120px;
         overflow: auto;
+      }
+      .activity-structured {
+        display: grid;
+        gap: 7px;
+        margin-top: 7px;
+      }
+      .activity-kv {
+        display: grid;
+        grid-template-columns: 52px minmax(0, 1fr);
+        gap: 8px;
+        color: #746f67;
+        font-size: 12px;
+      }
+      .activity-kv code,
+      .activity-file-list code {
+        min-width: 0;
+        color: #202020;
+        background: #f7f7f4;
+        border-radius: 5px;
+        padding: 2px 5px;
+        word-break: break-word;
+      }
+      .activity-output {
+        margin: 0;
+        max-height: 120px;
+        overflow: auto;
+        white-space: pre-wrap;
+        word-break: break-word;
+        color: #f4f6ef;
+        background: #121512;
+        border-radius: 6px;
+        padding: 8px;
+        font-size: 12px;
+        font-family: Consolas, ui-monospace, monospace;
+      }
+      .activity-file-list,
+      .activity-plan {
+        display: grid;
+        gap: 6px;
+        margin: 0;
+        padding: 0;
+        list-style: none;
+      }
+      .activity-file-list li {
+        display: grid;
+        grid-template-columns: 54px minmax(0, 1fr);
+        gap: 8px;
+      }
+      .activity-file-list span {
+        color: #746f67;
+        font-size: 12px;
+      }
+      .activity-plan li {
+        position: relative;
+        padding-left: 18px;
+        color: #3d453a;
+      }
+      .activity-plan li::before {
+        content: "";
+        position: absolute;
+        left: 2px;
+        top: 0.6em;
+        width: 7px;
+        height: 7px;
+        border-radius: 999px;
+        background: #a7b1a0;
+      }
+      .activity-plan li.done::before {
+        background: #6a8f7a;
+      }
+      .activity-plan li.running::before {
+        background: #2f7d54;
+      }
+      .activity-plan li.waiting::before {
+        background: #b7791f;
       }
       .chat-log {
         grid-area: chatLog;
@@ -767,6 +844,7 @@ export const litePageHtml = String.raw`<!doctype html>
         .workspace-count { display: none; }
         .chat-head { margin: 8px 12px 0; }
         .work-panel { margin: 8px 12px 0; }
+        .activity-list { margin: 0 12px; }
         .chat-log { padding: 12px; }
         .debug { margin: 0 12px 12px; }
         .bubble { max-width: 92%; }
@@ -831,6 +909,13 @@ export const litePageHtml = String.raw`<!doctype html>
         </div>
         <button id="bottomBtn" type="button" class="bottom-btn hidden">到底部 ↓</button>
 
+        <div id="activityList" class="activity-list">
+          <div class="activity-item empty">
+            <strong class="activity-title">暂无活动</strong>
+            <div class="activity-detail">发送消息后，这里会显示计划、工具调用和文件修改状态。</div>
+          </div>
+        </div>
+
         <form id="composer" class="composer">
           <div id="bottomStatus" class="bottom-status hidden">
             <div>
@@ -872,6 +957,7 @@ export const litePageHtml = String.raw`<!doctype html>
         var replySyncBaselineText = "";
         var replySyncStartedAt = 0;
         var pendingUserBubble = null;
+        var activities = [];
         var currentTurnByThread = {};
         var workspaceOpenByKey = readWorkspaceOpenState();
 
@@ -885,6 +971,7 @@ export const litePageHtml = String.raw`<!doctype html>
         var actionMsg = document.getElementById("actionMsg");
         var logEl = document.getElementById("log");
         var chatLog = document.getElementById("chatLog");
+        var activityList = document.getElementById("activityList");
         var workspaceList = document.getElementById("workspaceList");
         var promptEl = document.getElementById("prompt");
         var cwdEl = document.getElementById("cwd");
@@ -919,11 +1006,252 @@ export const litePageHtml = String.raw`<!doctype html>
           updateBottomStatus(phase, label, detail);
         }
 
-        function resetActivities() {}
+        function resetActivities() {
+          activities = [];
+          renderActivities();
+        }
 
-        function upsertActivity() {}
+        function upsertActivity(next) {
+          var now = Date.now();
+          var index = -1;
+          for (var i = 0; i < activities.length; i++) {
+            if (activities[i].id === next.id) {
+              index = i;
+              break;
+            }
+          }
+          if (index >= 0) {
+            activities[index] = Object.assign({}, activities[index], next, { ts: now });
+          } else {
+            activities.unshift(Object.assign({}, next, { ts: now }));
+          }
+          activities = activities.slice(0, 40);
+          renderActivities();
+        }
 
-        function appendActivityDetail() {}
+        function appendActivityDetail(id, seed, detail) {
+          if (!detail) return;
+          var existing = null;
+          for (var i = 0; i < activities.length; i++) {
+            if (activities[i].id === id) {
+              existing = activities[i];
+              break;
+            }
+          }
+          var combined = existing && existing.detail ? existing.detail + "\n" + detail : detail;
+          upsertActivity(Object.assign({}, seed, {
+            id: id,
+            detail: shorten(combined, 1800)
+          }));
+        }
+
+        function renderActivities() {
+          activityList.innerHTML = "";
+          if (!activities.length) {
+            var empty = document.createElement("div");
+            empty.className = "activity-item empty";
+            var title = document.createElement("strong");
+            title.className = "activity-title";
+            title.textContent = "暂无活动";
+            var detail = document.createElement("div");
+            detail.className = "activity-detail";
+            detail.textContent = "发送消息后，这里会显示计划、工具调用和文件修改状态。";
+            empty.appendChild(title);
+            empty.appendChild(detail);
+            activityList.appendChild(empty);
+            return;
+          }
+          for (var i = 0; i < activities.length; i++) {
+            activityList.appendChild(renderActivityItem(activities[i]));
+          }
+        }
+
+        function renderActivityItem(item) {
+          var wrap = document.createElement("div");
+          wrap.className = "activity-item " + (item.state || "running");
+          var head = document.createElement("div");
+          head.className = "activity-head";
+          var kind = document.createElement("span");
+          kind.textContent = item.kind || "状态";
+          var time = document.createElement("time");
+          time.textContent = new Date(item.ts || Date.now()).toLocaleTimeString();
+          head.appendChild(kind);
+          head.appendChild(time);
+          wrap.appendChild(head);
+
+          var title = document.createElement("strong");
+          title.className = "activity-title";
+          title.textContent = item.title || "";
+          wrap.appendChild(title);
+
+          if (item.detail) {
+            appendActivityDetailBlocks(wrap, item);
+          }
+          return wrap;
+        }
+
+        function appendActivityDetailBlocks(target, item) {
+          var container = document.createElement("div");
+          container.className = "activity-structured";
+          var blocks = activityDetailBlocks(item);
+          for (var i = 0; i < blocks.length; i++) {
+            appendActivityBlock(container, blocks[i]);
+          }
+          target.appendChild(container);
+        }
+
+        function appendActivityBlock(target, block) {
+          if (block.kind === "command") {
+            if (block.command) appendActivityKv(target, "命令", block.command);
+            if (block.cwd) appendActivityKv(target, "目录", block.cwd);
+            if (block.exitCode) appendActivityKv(target, "退出码", block.exitCode);
+            if (block.output) appendActivityOutput(target, block.output);
+            return;
+          }
+          if (block.kind === "files") {
+            var list = document.createElement("ul");
+            list.className = "activity-file-list";
+            for (var i = 0; i < block.files.length; i++) {
+              var li = document.createElement("li");
+              var action = document.createElement("span");
+              action.textContent = block.files[i].action;
+              var path = document.createElement("code");
+              path.textContent = block.files[i].path;
+              li.appendChild(action);
+              li.appendChild(path);
+              list.appendChild(li);
+            }
+            target.appendChild(list);
+            return;
+          }
+          if (block.kind === "plan") {
+            var plan = document.createElement("ol");
+            plan.className = "activity-plan";
+            if (block.explanation) {
+              var explanation = document.createElement("div");
+              explanation.className = "activity-detail";
+              explanation.textContent = block.explanation;
+              target.appendChild(explanation);
+            }
+            for (var p = 0; p < block.steps.length; p++) {
+              var step = document.createElement("li");
+              step.className = planStepClass(block.steps[p].status);
+              step.textContent = block.steps[p].text;
+              plan.appendChild(step);
+            }
+            target.appendChild(plan);
+            return;
+          }
+          if (block.kind === "tool") {
+            if (block.name) appendActivityKv(target, "工具", block.name);
+            if (block.payload) appendActivityOutput(target, block.payload);
+            if (block.error) {
+              var error = document.createElement("div");
+              error.className = "activity-detail";
+              error.textContent = block.error;
+              target.appendChild(error);
+            }
+            return;
+          }
+          var detail = document.createElement("div");
+          detail.className = "activity-detail";
+          detail.textContent = block.text || "";
+          target.appendChild(detail);
+        }
+
+        function appendActivityKv(target, label, value) {
+          var row = document.createElement("div");
+          row.className = "activity-kv";
+          var labelEl = document.createElement("span");
+          labelEl.textContent = label;
+          var valueEl = document.createElement("code");
+          valueEl.textContent = value;
+          row.appendChild(labelEl);
+          row.appendChild(valueEl);
+          target.appendChild(row);
+        }
+
+        function appendActivityOutput(target, text) {
+          var pre = document.createElement("pre");
+          pre.className = "activity-output";
+          pre.textContent = text;
+          target.appendChild(pre);
+        }
+
+        function activityDetailBlocks(item) {
+          var detail = item.detail ? String(item.detail).replace(/^\\s+|\\s+$/g, "") : "";
+          if (!detail) return [];
+          if (item.kind === "工具" && (detail.indexOf("$ ") === 0 || detail.indexOf("\n目录：") !== -1 || detail.indexOf("\n退出码：") !== -1)) {
+            return [parseCommandDetail(detail)];
+          }
+          if (item.kind === "文件") {
+            var files = detail.split("\n").map(parseFileChangeLine).filter(Boolean);
+            if (files.length) return [{ kind: "files", files: files }];
+          }
+          if (item.kind === "计划") {
+            var plan = parsePlanDetail(detail);
+            if (plan.steps.length) return [plan];
+          }
+          if (item.kind === "MCP" || item.kind === "子任务" || (item.kind === "工具" && detail.indexOf("$ ") !== 0)) {
+            return [parseToolDetail(detail)];
+          }
+          return detail.split("\n\n").map(function (text) {
+            return { kind: "text", text: text };
+          });
+        }
+
+        function parseCommandDetail(detail) {
+          var lines = detail.split("\n");
+          var first = lines[0] || "";
+          var command = first.indexOf("$ ") === 0 ? first.slice(2) : "";
+          if (command) lines.shift();
+          var cwd = "";
+          var exitCode = "";
+          var output = [];
+          for (var i = 0; i < lines.length; i++) {
+            if (lines[i].indexOf("目录：") === 0) cwd = lines[i].slice(3);
+            else if (lines[i].indexOf("退出码：") === 0) exitCode = lines[i].slice(4);
+            else output.push(lines[i]);
+          }
+          return { kind: "command", command: command || detail, cwd: cwd, exitCode: exitCode, output: output.join("\n").replace(/^\\s+|\\s+$/g, "") };
+        }
+
+        function parseFileChangeLine(line) {
+          var text = String(line || "").replace(/^\\s+|\\s+$/g, "");
+          if (!text) return null;
+          var match = /^(\\S+)\\s+(.+)$/.exec(text);
+          return match ? { action: match[1], path: match[2] } : { action: "change", path: text };
+        }
+
+        function parsePlanDetail(detail) {
+          var steps = [];
+          var explanation = [];
+          var lines = detail.split("\n");
+          for (var i = 0; i < lines.length; i++) {
+            var match = /^([✓→·-])\\s*(.+)$/.exec(lines[i].replace(/^\\s+|\\s+$/g, ""));
+            if (match) steps.push({ status: match[1], text: match[2].replace(/^\\s+|\\s+$/g, "") });
+            else if (lines[i].replace(/^\\s+|\\s+$/g, "")) explanation.push(lines[i].replace(/^\\s+|\\s+$/g, ""));
+          }
+          return { kind: "plan", explanation: explanation.join("\n"), steps: steps };
+        }
+
+        function parseToolDetail(detail) {
+          var lines = detail.split("\n");
+          var name = lines.shift() || "";
+          var rest = lines.join("\n").replace(/^\\s+|\\s+$/g, "");
+          var error = "";
+          for (var i = 0; i < lines.length; i++) {
+            if (lines[i].indexOf("错误：") === 0) error = lines[i].slice(3);
+          }
+          return { kind: "tool", name: name, payload: error ? rest.replace("错误：" + error, "").replace(/^\\s+|\\s+$/g, "") : rest, error: error };
+        }
+
+        function planStepClass(status) {
+          if (status === "✓") return "done";
+          if (status === "→") return "running";
+          if (status === "·") return "waiting";
+          return "pending";
+        }
 
         function envelope(type, payload, requestId) {
           return JSON.stringify({

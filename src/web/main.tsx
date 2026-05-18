@@ -37,6 +37,13 @@ type ActivityItem = {
   state: ActivityState;
 };
 
+type ActivityDetailBlock =
+  | { kind: "text"; text: string }
+  | { kind: "command"; command: string; cwd?: string; exitCode?: string; output?: string }
+  | { kind: "files"; files: { action: string; path: string }[] }
+  | { kind: "plan"; explanation?: string; steps: { status: string; text: string }[] }
+  | { kind: "tool"; name?: string; payload?: string; error?: string };
+
 type WorkPhase = "idle" | "thinking" | "tool" | "waiting" | "replying" | "complete" | "error";
 
 type WorkStatus = {
@@ -1127,7 +1134,7 @@ function App() {
                           <time>{new Date(item.ts).toLocaleTimeString()}</time>
                         </header>
                         <strong>{item.title}</strong>
-                        {item.detail && <pre>{item.detail}</pre>}
+                        {item.detail && <ActivityDetail item={item} />}
                       </article>
                     ))
                   )}
@@ -1150,6 +1157,7 @@ function App() {
                     <span>{item.kind}</span>
                     <time>{new Date(item.ts).toLocaleTimeString()}</time>
                   </header>
+                  <p>{eventSummary(item.body)}</p>
                   <pre>{JSON.stringify(item.body, null, 2)}</pre>
                 </article>
               ))}
@@ -1470,6 +1478,189 @@ function labelForRole(role: ChatHistoryMessage["role"]) {
     return "Codex";
   }
   return "系统";
+}
+
+function ActivityDetail({ item }: { item: ActivityItem }) {
+  const blocks = activityDetailBlocks(item);
+  return (
+    <div className="activity-detail-blocks">
+      {blocks.map((block, index) => {
+        if (block.kind === "command") {
+          return (
+            <div className="activity-command" key={index}>
+              <div className="activity-kv">
+                <span>命令</span>
+                <code>{block.command}</code>
+              </div>
+              {block.cwd && (
+                <div className="activity-kv">
+                  <span>目录</span>
+                  <code>{block.cwd}</code>
+                </div>
+              )}
+              {block.exitCode && (
+                <div className="activity-kv">
+                  <span>退出码</span>
+                  <code>{block.exitCode}</code>
+                </div>
+              )}
+              {block.output && <pre className="activity-output">{block.output}</pre>}
+            </div>
+          );
+        }
+        if (block.kind === "files") {
+          return (
+            <ul className="activity-file-list" key={index}>
+              {block.files.map((file, fileIndex) => (
+                <li key={fileIndex}>
+                  <span>{file.action}</span>
+                  <code>{file.path}</code>
+                </li>
+              ))}
+            </ul>
+          );
+        }
+        if (block.kind === "plan") {
+          return (
+            <div className="activity-plan" key={index}>
+              {block.explanation && <p>{block.explanation}</p>}
+              <ol>
+                {block.steps.map((step, stepIndex) => (
+                  <li className={`plan-step ${planStepClass(step.status)}`} key={stepIndex}>
+                    <span>{step.text}</span>
+                  </li>
+                ))}
+              </ol>
+            </div>
+          );
+        }
+        if (block.kind === "tool") {
+          return (
+            <div className="activity-tool" key={index}>
+              {block.name && (
+                <div className="activity-kv">
+                  <span>工具</span>
+                  <code>{block.name}</code>
+                </div>
+              )}
+              {block.payload && <pre className="activity-output">{block.payload}</pre>}
+              {block.error && <p className="activity-error">{block.error}</p>}
+            </div>
+          );
+        }
+        return (
+          <p className="activity-text" key={index}>
+            {block.text}
+          </p>
+        );
+      })}
+    </div>
+  );
+}
+
+function activityDetailBlocks(item: ActivityItem): ActivityDetailBlock[] {
+  const detail = item.detail?.trim();
+  if (!detail) {
+    return [];
+  }
+  if (item.kind === "工具" && (detail.startsWith("$ ") || detail.includes("\n目录：") || detail.includes("\n退出码："))) {
+    return [parseCommandDetail(detail)];
+  }
+  if (item.kind === "文件") {
+    const files = detail
+      .split("\n")
+      .map(parseFileChangeLine)
+      .filter((file): file is { action: string; path: string } => Boolean(file));
+    if (files.length) {
+      return [{ kind: "files", files }];
+    }
+  }
+  if (item.kind === "计划") {
+    const plan = parsePlanDetail(detail);
+    if (plan.steps.length) {
+      return [plan];
+    }
+  }
+  if (item.kind === "MCP" || item.kind === "子任务" || (item.kind === "工具" && !detail.startsWith("$ "))) {
+    return [parseToolDetail(detail)];
+  }
+  return detail.split("\n\n").map((text) => ({ kind: "text", text }));
+}
+
+function parseCommandDetail(detail: string): ActivityDetailBlock {
+  const lines = detail.split("\n");
+  const command = lines[0]?.startsWith("$ ") ? lines.shift()!.slice(2) : "";
+  let cwd = "";
+  let exitCode = "";
+  const output: string[] = [];
+  for (const line of lines) {
+    if (line.startsWith("目录：")) {
+      cwd = line.slice("目录：".length);
+    } else if (line.startsWith("退出码：")) {
+      exitCode = line.slice("退出码：".length);
+    } else {
+      output.push(line);
+    }
+  }
+  return { kind: "command", command: command || detail, cwd, exitCode, output: output.join("\n").trim() };
+}
+
+function parseFileChangeLine(line: string) {
+  const match = /^(\S+)\s+(.+)$/.exec(line.trim());
+  if (!match) {
+    return line.trim() ? { action: "change", path: line.trim() } : undefined;
+  }
+  return { action: match[1]!, path: match[2]! };
+}
+
+function parsePlanDetail(detail: string): Extract<ActivityDetailBlock, { kind: "plan" }> {
+  const steps: { status: string; text: string }[] = [];
+  const explanation: string[] = [];
+  for (const line of detail.split("\n")) {
+    const match = /^([✓→·-])\s*(.+)$/.exec(line.trim());
+    if (match) {
+      steps.push({ status: match[1]!, text: match[2]!.trim() });
+    } else if (line.trim()) {
+      explanation.push(line.trim());
+    }
+  }
+  return { kind: "plan", explanation: explanation.join("\n"), steps };
+}
+
+function parseToolDetail(detail: string): ActivityDetailBlock {
+  const lines = detail.split("\n");
+  const name = lines.shift()?.trim();
+  const rest = lines.join("\n").trim();
+  const errorLine = lines.find((line) => line.startsWith("错误："));
+  return {
+    kind: "tool",
+    name,
+    payload: errorLine ? rest.replace(errorLine, "").trim() : rest,
+    error: errorLine ? errorLine.slice("错误：".length) : undefined
+  };
+}
+
+function planStepClass(status: string) {
+  if (status === "✓") return "done";
+  if (status === "→") return "running";
+  if (status === "·") return "waiting";
+  return "pending";
+}
+
+function eventSummary(body: unknown) {
+  const value = body as any;
+  const message = value?.message ?? value;
+  const method = typeof message?.method === "string" ? message.method : "";
+  if (!method) {
+    return typeof body === "string" ? body : "原始事件";
+  }
+  const params = message.params ?? {};
+  if (method === "item/commandExecution/outputDelta") return "命令输出更新";
+  if (method === "item/fileChange/patchUpdated") return "文件补丁已更新";
+  if (method === "item/agentMessage/delta") return "助手回复流式返回";
+  if (method === "turn/plan/updated") return currentPlanStep(params.plan) ?? "计划状态更新";
+  if (method === "item/completed" && params.item?.type) return `${params.item.type} 完成`;
+  return method;
 }
 
 type ChatTextPart =
