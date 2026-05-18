@@ -1004,15 +1004,40 @@ function App() {
             </aside>
 
             <section className="workspace-main">
-              <section className="panel composer">
-                <div className="composer-head">
+              <section className="panel chat-panel">
+                <div className="chat-head">
                   <div>
                     <h2>{currentTitle}</h2>
                     <p>{currentSubtitle}</p>
                   </div>
-                  <button type="button" className="secondary-button" onClick={interruptTurn}>
-                    打断
-                  </button>
+                  <div className="chat-head-actions">
+                    <button type="button" className="secondary-button" onClick={() => setReplies([])}>
+                      清空
+                    </button>
+                    <button type="button" className="secondary-button" onClick={interruptTurn}>
+                      打断
+                    </button>
+                  </div>
+                </div>
+
+                <div className="chat-list" ref={chatListRef}>
+                  {replies.length === 0 ? (
+                    <article className="chat-empty">
+                      <pre>等待回复...</pre>
+                    </article>
+                  ) : (
+                    replies.map((item) => (
+                      <article key={item.id} className={`chat-row ${item.role}`}>
+                        <div className="chat-bubble">
+                          <header>
+                            <span>{item.kind}</span>
+                            <time>{new Date(item.ts).toLocaleTimeString()}</time>
+                          </header>
+                          <pre>{String(item.body ?? "")}</pre>
+                        </div>
+                      </article>
+                    ))
+                  )}
                 </div>
 
                 {!currentThreadId && (
@@ -1030,7 +1055,7 @@ function App() {
                     value={prompt}
                     onChange={(event) => setPrompt(event.target.value)}
                     placeholder="发给 Codex 的消息"
-                    rows={8}
+                    rows={4}
                   />
                   <button type="submit" disabled={busy || !prompt.trim()}>
                     {busy ? "发送中" : "发送"}
@@ -1051,6 +1076,12 @@ function App() {
                     {workStatus.detail && <p>{workStatus.detail}</p>}
                   </div>
                 </div>
+              </section>
+
+              <section className="panel activity-panel">
+                <div className="panel-head">
+                  <h2>活动</h2>
+                </div>
                 <div className="activity-list">
                   {activities.length === 0 ? (
                     <article className="activity-item empty">
@@ -1066,34 +1097,6 @@ function App() {
                         </header>
                         <strong>{item.title}</strong>
                         {item.detail && <pre>{item.detail}</pre>}
-                      </article>
-                    ))
-                  )}
-                </div>
-              </section>
-
-              <section className="panel events">
-                <div className="panel-head">
-                  <h2>对话</h2>
-                  <button type="button" onClick={() => setReplies([])}>
-                    清空
-                  </button>
-                </div>
-                <div className="chat-list" ref={chatListRef}>
-                  {replies.length === 0 ? (
-                    <article className="chat-empty">
-                      <pre>等待回复...</pre>
-                    </article>
-                  ) : (
-                    replies.map((item) => (
-                      <article key={item.id} className={`chat-row ${item.role}`}>
-                        <div className="chat-bubble">
-                          <header>
-                            <span>{item.kind}</span>
-                            <time>{new Date(item.ts).toLocaleTimeString()}</time>
-                          </header>
-                          <pre>{String(item.body ?? "")}</pre>
-                        </div>
                       </article>
                     ))
                   )}
