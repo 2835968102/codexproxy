@@ -374,13 +374,14 @@ label {
 }
 
 .chat-panel textarea {
-  min-height: 88px;
+  min-height: 48px;
   max-height: 220px;
+  overflow-y: auto;
 }
 
 .chat-panel form button {
   min-width: 96px;
-  min-height: 88px;
+  min-height: 48px;
 }
 
 .chat-head {

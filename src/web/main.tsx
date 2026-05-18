@@ -1,4 +1,4 @@
-import React, { FormEvent, useEffect, useMemo, useRef, useState } from "react";
+import React, { FormEvent, KeyboardEvent, useEffect, useMemo, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import {
   Envelope,
@@ -100,6 +100,7 @@ function App() {
   const currentTurnByThread = useRef(new Map<string, string>());
   const currentThreadIdRef = useRef(currentThreadId);
   const chatListRef = useRef<HTMLDivElement | null>(null);
+  const promptRef = useRef<HTMLTextAreaElement | null>(null);
   const activeReplyIdRef = useRef<string | undefined>(undefined);
   const retryingWithoutSessionRef = useRef(false);
 
@@ -119,6 +120,10 @@ function App() {
       el.scrollTop = el.scrollHeight;
     }
   }, [replies]);
+
+  useEffect(() => {
+    resizePrompt();
+  }, [prompt]);
 
   const activeThread = useMemo(
     () => threads.find((thread) => thread.id === currentThreadId),
@@ -810,7 +815,31 @@ function App() {
       });
     } finally {
       setBusy(false);
+      requestAnimationFrame(() => promptRef.current?.focus());
     }
+  }
+
+  function updatePrompt(value: string) {
+    setPrompt(value);
+  }
+
+  function handlePromptKeyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
+    if (event.key !== "Enter" || event.shiftKey || event.ctrlKey || event.altKey || event.metaKey) {
+      return;
+    }
+    event.preventDefault();
+    if (!busy && prompt.trim()) {
+      event.currentTarget.form?.requestSubmit();
+    }
+  }
+
+  function resizePrompt() {
+    const el = promptRef.current;
+    if (!el) {
+      return;
+    }
+    el.style.height = "auto";
+    el.style.height = `${Math.min(el.scrollHeight, 220)}px`;
   }
 
   async function startNewThread() {
@@ -1052,8 +1081,10 @@ function App() {
                 )}
                 <form onSubmit={sendPrompt}>
                   <textarea
+                    ref={promptRef}
                     value={prompt}
-                    onChange={(event) => setPrompt(event.target.value)}
+                    onChange={(event) => updatePrompt(event.target.value)}
+                    onKeyDown={handlePromptKeyDown}
                     placeholder="发给 Codex 的消息"
                     rows={4}
                   />
