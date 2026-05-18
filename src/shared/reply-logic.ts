@@ -18,24 +18,22 @@ export function selectLatestAssistantMessage(candidates: AssistantMessageCandida
 
 export type PendingUserBubble = {
   text: string;
-  body: unknown;
 };
 
 export function createPendingUserBubbleTracker() {
   let pending: PendingUserBubble | null = null;
 
   return {
-    register(text: string, body: unknown) {
-      pending = { text, body };
+    register(text: string) {
+      pending = { text };
       return pending;
     },
     consume(text: string) {
       if (!pending || pending.text !== text) {
-        return null;
+        return false;
       }
-      const body = pending.body;
       pending = null;
-      return body;
+      return true;
     },
     clear() {
       pending = null;

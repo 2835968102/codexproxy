@@ -20,13 +20,12 @@ describe("reply logic", () => {
     ).toEqual({ id: "a2", text: "新消息", ts: 20, phase: null });
   });
 
-  it("tracks a single pending user bubble and consumes matching remote echo", () => {
+  it("tracks a single pending user message and clears it when the remote echo arrives", () => {
     const tracker = createPendingUserBubbleTracker();
-    const body = { id: "dom-node" };
-    tracker.register("hello", body);
+    tracker.register("hello");
 
-    expect(tracker.consume("hello")).toBe(body);
-    expect(tracker.consume("hello")).toBeNull();
-    expect(tracker.consume("other")).toBeNull();
+    expect(tracker.consume("hello")).toBe(true);
+    expect(tracker.consume("hello")).toBe(false);
+    expect(tracker.consume("other")).toBe(false);
   });
 });

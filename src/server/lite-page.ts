@@ -1236,7 +1236,7 @@ export const litePageHtml = String.raw`<!doctype html>
           replySyncAttempts = 0;
           cancelReplySync();
           resetActivities();
-          pendingUserBubble = { text: prompt, body: addBubble("user", prompt) };
+          pendingUserBubble = { text: prompt };
           setWork("thinking", "Codex 正在思考", "请求已发出，正在等待 Codex 返回实时状态。");
           promptEl.value = "";
           autoSizePrompt();
@@ -1631,11 +1631,7 @@ export const litePageHtml = String.raw`<!doctype html>
           var text = userContentToText(item && item.content);
           if (!text) return;
           if (pendingUserBubble && pendingUserBubble.text === text) {
-            if (itemId) {
-              bubbleByItemId[itemId] = pendingUserBubble.body;
-            }
             pendingUserBubble = null;
-            return;
           }
           addBubble("user", text, "你 · " + new Date().toLocaleTimeString(), itemId || undefined);
         }
