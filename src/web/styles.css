@@ -596,13 +596,41 @@ label {
   color: rgba(255, 255, 255, 0.64);
 }
 
-.chat-bubble pre {
+.chat-message {
+  display: grid;
+  gap: 10px;
+}
+
+.chat-message p {
   margin: 0;
   white-space: pre-wrap;
   word-break: break-word;
   overflow-wrap: anywhere;
-  font: inherit;
   line-height: 1.5;
+}
+
+.chat-code {
+  overflow: hidden;
+  border: 1px solid #d8ddd2;
+  border-radius: 8px;
+  background: #121512;
+}
+
+.chat-code-lang {
+  display: block;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.12);
+  color: #aab4a6;
+  font-size: 12px;
+  padding: 6px 10px;
+}
+
+.chat-code pre {
+  margin: 0;
+  overflow: auto;
+  white-space: pre;
+  color: #f4f6ef;
+  padding: 10px;
+  font: 12px/1.55 Consolas, "SFMono-Regular", ui-monospace, monospace;
 }
 
 .chat-empty pre {

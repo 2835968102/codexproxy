@@ -1062,7 +1062,7 @@ function App() {
                             <span>{item.kind}</span>
                             <time>{new Date(item.ts).toLocaleTimeString()}</time>
                           </header>
-                          <pre>{String(item.body ?? "")}</pre>
+                          <div className="chat-message">{renderChatText(String(item.body ?? ""))}</div>
                         </div>
                       </article>
                     ))
@@ -1470,6 +1470,50 @@ function labelForRole(role: ChatHistoryMessage["role"]) {
     return "Codex";
   }
   return "系统";
+}
+
+type ChatTextPart =
+  | { kind: "text"; text: string }
+  | { kind: "code"; code: string; language?: string };
+
+function renderChatText(text: string) {
+  const parts = splitCodeFences(text);
+  return parts.map((part, index) => {
+    if (part.kind === "code") {
+      return (
+        <div className="chat-code" key={index}>
+          {part.language && <span className="chat-code-lang">{part.language}</span>}
+          <pre>{part.code}</pre>
+        </div>
+      );
+    }
+    return <p key={index}>{part.text}</p>;
+  });
+}
+
+function splitCodeFences(text: string): ChatTextPart[] {
+  const parts: ChatTextPart[] = [];
+  const pattern = /```([^\n`]*)\n?([\s\S]*?)```/g;
+  let lastIndex = 0;
+  let match: RegExpExecArray | null;
+
+  while ((match = pattern.exec(text)) !== null) {
+    if (match.index > lastIndex) {
+      parts.push({ kind: "text", text: text.slice(lastIndex, match.index) });
+    }
+    parts.push({
+      kind: "code",
+      language: match[1]?.trim() || undefined,
+      code: match[2] ?? ""
+    });
+    lastIndex = pattern.lastIndex;
+  }
+
+  if (lastIndex < text.length) {
+    parts.push({ kind: "text", text: text.slice(lastIndex) });
+  }
+
+  return parts.length ? parts.filter((part) => part.kind === "code" || part.text.length > 0) : [{ kind: "text", text }];
 }
 
 function readWorkspaceOpenState(): Record<string, boolean> {
