@@ -1473,11 +1473,12 @@ function labelForRole(role: ChatHistoryMessage["role"]) {
 }
 
 type ChatTextPart =
-  | { kind: "text"; text: string }
+  | { kind: "block"; type: "paragraph" | "heading" | "quote"; text: string; level?: number }
+  | { kind: "list"; ordered: boolean; items: string[] }
   | { kind: "code"; code: string; language?: string };
 
 function renderChatText(text: string) {
-  const parts = splitCodeFences(text);
+  const parts = parseMarkdownBlocks(text);
   return parts.map((part, index) => {
     if (part.kind === "code") {
       return (
@@ -1487,11 +1488,28 @@ function renderChatText(text: string) {
         </div>
       );
     }
-    return <p key={index}>{part.text}</p>;
+    if (part.kind === "list") {
+      const Tag = part.ordered ? "ol" : "ul";
+      return (
+        <Tag key={index}>
+          {part.items.map((item, itemIndex) => (
+            <li key={itemIndex}>{renderInlineMarkdown(item)}</li>
+          ))}
+        </Tag>
+      );
+    }
+    if (part.type === "heading") {
+      const Tag = `h${Math.min(Math.max(part.level ?? 3, 1), 4)}` as "h1" | "h2" | "h3" | "h4";
+      return <Tag key={index}>{renderInlineMarkdown(part.text)}</Tag>;
+    }
+    if (part.type === "quote") {
+      return <blockquote key={index}>{renderInlineMarkdown(part.text)}</blockquote>;
+    }
+    return <p key={index}>{renderInlineMarkdown(part.text)}</p>;
   });
 }
 
-function splitCodeFences(text: string): ChatTextPart[] {
+function parseMarkdownBlocks(text: string): ChatTextPart[] {
   const parts: ChatTextPart[] = [];
   const pattern = /```([^\n`]*)\n?([\s\S]*?)```/g;
   let lastIndex = 0;
@@ -1499,7 +1517,7 @@ function splitCodeFences(text: string): ChatTextPart[] {
 
   while ((match = pattern.exec(text)) !== null) {
     if (match.index > lastIndex) {
-      parts.push({ kind: "text", text: text.slice(lastIndex, match.index) });
+      parts.push(...parseTextBlocks(text.slice(lastIndex, match.index)));
     }
     parts.push({
       kind: "code",
@@ -1510,10 +1528,100 @@ function splitCodeFences(text: string): ChatTextPart[] {
   }
 
   if (lastIndex < text.length) {
-    parts.push({ kind: "text", text: text.slice(lastIndex) });
+    parts.push(...parseTextBlocks(text.slice(lastIndex)));
   }
 
-  return parts.length ? parts.filter((part) => part.kind === "code" || part.text.length > 0) : [{ kind: "text", text }];
+  return parts.length ? parts : [{ kind: "block", type: "paragraph", text }];
+}
+
+function parseTextBlocks(text: string): ChatTextPart[] {
+  const blocks: ChatTextPart[] = [];
+  const lines = text.replace(/\r\n/g, "\n").split("\n");
+  let paragraph: string[] = [];
+  let list: { ordered: boolean; items: string[] } | null = null;
+
+  const flushParagraph = () => {
+    if (paragraph.length) {
+      blocks.push({ kind: "block", type: "paragraph", text: paragraph.join("\n").trim() });
+      paragraph = [];
+    }
+  };
+  const flushList = () => {
+    if (list) {
+      blocks.push({ kind: "list", ordered: list.ordered, items: list.items });
+      list = null;
+    }
+  };
+
+  for (const rawLine of lines) {
+    const line = rawLine.trimEnd();
+    if (!line.trim()) {
+      flushParagraph();
+      flushList();
+      continue;
+    }
+
+    const heading = /^(#{1,4})\s+(.+)$/.exec(line);
+    if (heading) {
+      flushParagraph();
+      flushList();
+      blocks.push({ kind: "block", type: "heading", level: heading[1]!.length, text: heading[2]!.trim() });
+      continue;
+    }
+
+    const quote = /^>\s?(.+)$/.exec(line);
+    if (quote) {
+      flushParagraph();
+      flushList();
+      blocks.push({ kind: "block", type: "quote", text: quote[1]!.trim() });
+      continue;
+    }
+
+    const unordered = /^\s*[-*]\s+(.+)$/.exec(line);
+    const ordered = /^\s*\d+[.)]\s+(.+)$/.exec(line);
+    if (unordered || ordered) {
+      flushParagraph();
+      const isOrdered = Boolean(ordered);
+      if (!list || list.ordered !== isOrdered) {
+        flushList();
+        list = { ordered: isOrdered, items: [] };
+      }
+      list.items.push((ordered?.[1] ?? unordered?.[1] ?? "").trim());
+      continue;
+    }
+
+    flushList();
+    paragraph.push(line);
+  }
+
+  flushParagraph();
+  flushList();
+  return blocks;
+}
+
+function renderInlineMarkdown(text: string) {
+  const nodes: React.ReactNode[] = [];
+  const pattern = /(`[^`]+`|\*\*[^*]+\*\*)/g;
+  let lastIndex = 0;
+  let match: RegExpExecArray | null;
+
+  while ((match = pattern.exec(text)) !== null) {
+    if (match.index > lastIndex) {
+      nodes.push(text.slice(lastIndex, match.index));
+    }
+    const token = match[0];
+    if (token.startsWith("`")) {
+      nodes.push(<code key={nodes.length}>{token.slice(1, -1)}</code>);
+    } else {
+      nodes.push(<strong key={nodes.length}>{token.slice(2, -2)}</strong>);
+    }
+    lastIndex = pattern.lastIndex;
+  }
+
+  if (lastIndex < text.length) {
+    nodes.push(text.slice(lastIndex));
+  }
+  return nodes;
 }
 
 function readWorkspaceOpenState(): Record<string, boolean> {

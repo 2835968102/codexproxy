@@ -451,7 +451,6 @@ export const litePageHtml = String.raw`<!doctype html>
         border-radius: 12px;
         padding: 10px 12px;
         line-height: 1.55;
-        white-space: pre-wrap;
         word-break: break-word;
         box-shadow: 0 1px 0 rgba(0, 0, 0, 0.03);
       }
@@ -476,6 +475,73 @@ export const litePageHtml = String.raw`<!doctype html>
         color: #7b756d;
         font-size: 11px;
         margin-bottom: 4px;
+      }
+      .bubble-body {
+        display: grid;
+        gap: 8px;
+      }
+      .bubble-body p,
+      .bubble-body blockquote,
+      .bubble-body ul,
+      .bubble-body ol,
+      .bubble-body h1,
+      .bubble-body h2,
+      .bubble-body h3,
+      .bubble-body h4 {
+        margin: 0;
+      }
+      .bubble-body p,
+      .bubble-body li,
+      .bubble-body blockquote {
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+      }
+      .bubble-body h1,
+      .bubble-body h2,
+      .bubble-body h3,
+      .bubble-body h4 {
+        font-size: 15px;
+        line-height: 1.35;
+      }
+      .bubble-body ul,
+      .bubble-body ol {
+        padding-left: 22px;
+      }
+      .bubble-body blockquote {
+        border-left: 3px solid #b8c4b2;
+        color: #5f5a52;
+        padding-left: 10px;
+      }
+      .bubble-body code {
+        border-radius: 4px;
+        background: rgba(32, 32, 32, 0.08);
+        padding: 1px 4px;
+        font-family: Consolas, ui-monospace, monospace;
+        font-size: 0.92em;
+      }
+      .bubble.user .bubble-body code {
+        background: rgba(255, 255, 255, 0.16);
+      }
+      .bubble-code {
+        overflow: hidden;
+        border: 1px solid #dedbd2;
+        border-radius: 8px;
+        background: #121512;
+      }
+      .bubble-code-lang {
+        display: block;
+        border-bottom: 1px solid rgba(255, 255, 255, 0.12);
+        color: #aab4a6;
+        font-size: 12px;
+        padding: 6px 10px;
+      }
+      .bubble-code pre {
+        margin: 0;
+        overflow: auto;
+        white-space: pre;
+        color: #f4f6ef;
+        padding: 10px;
+        font: 12px/1.55 Consolas, ui-monospace, monospace;
       }
       .composer {
         position: sticky;
@@ -1700,7 +1766,8 @@ export const litePageHtml = String.raw`<!doctype html>
 
           body = document.createElement("div");
           body.setAttribute("data-body", "1");
-          body.textContent = text || "";
+          body.className = "bubble-body";
+          renderMarkdownInto(body, text || "");
           bubble.appendChild(body);
           row.appendChild(bubble);
           chatLog.appendChild(row);
@@ -1755,11 +1822,161 @@ export const litePageHtml = String.raw`<!doctype html>
             bubbleByItemId[itemId] = bubbleByItemId[fallbackItemId];
           }
           var node = ensureAssistantNode(itemId);
-          node.textContent = text || "";
+          renderMarkdownInto(node, text || "");
           activeAssistantItemId = itemId;
           lastAssistantBubble = node;
           lastAssistantItemId = itemId;
           scrollChat();
+        }
+
+        function renderMarkdownInto(target, text) {
+          target.textContent = "";
+          var parts = parseMarkdownBlocks(text || "");
+          for (var i = 0; i < parts.length; i++) {
+            appendMarkdownPart(target, parts[i]);
+          }
+        }
+
+        function appendMarkdownPart(target, part) {
+          if (part.kind === "code") {
+            var codeWrap = document.createElement("div");
+            codeWrap.className = "bubble-code";
+            if (part.language) {
+              var lang = document.createElement("span");
+              lang.className = "bubble-code-lang";
+              lang.textContent = part.language;
+              codeWrap.appendChild(lang);
+            }
+            var pre = document.createElement("pre");
+            pre.textContent = part.code || "";
+            codeWrap.appendChild(pre);
+            target.appendChild(codeWrap);
+            return;
+          }
+          if (part.kind === "list") {
+            var list = document.createElement(part.ordered ? "ol" : "ul");
+            for (var i = 0; i < part.items.length; i++) {
+              var li = document.createElement("li");
+              appendInlineMarkdown(li, part.items[i]);
+              list.appendChild(li);
+            }
+            target.appendChild(list);
+            return;
+          }
+
+          var tag = part.type === "heading" ? "h" + Math.min(Math.max(part.level || 3, 1), 4) : part.type === "quote" ? "blockquote" : "p";
+          var el = document.createElement(tag);
+          appendInlineMarkdown(el, part.text || "");
+          target.appendChild(el);
+        }
+
+        function parseMarkdownBlocks(text) {
+          var parts = [];
+          var fence = String.fromCharCode(96, 96, 96);
+          var pattern = new RegExp(fence + "([^\\n]*)\\n?([\\s\\S]*?)" + fence, "g");
+          var lastIndex = 0;
+          var match;
+          while ((match = pattern.exec(text)) !== null) {
+            if (match.index > lastIndex) {
+              parts = parts.concat(parseTextBlocks(text.slice(lastIndex, match.index)));
+            }
+            parts.push({
+              kind: "code",
+              language: trim(match[1] || ""),
+              code: match[2] || ""
+            });
+            lastIndex = pattern.lastIndex;
+          }
+          if (lastIndex < text.length) {
+            parts = parts.concat(parseTextBlocks(text.slice(lastIndex)));
+          }
+          return parts.length ? parts : [{ kind: "block", type: "paragraph", text: text }];
+        }
+
+        function parseTextBlocks(text) {
+          var blocks = [];
+          var lines = text.replace(/\r\n/g, "\n").split("\n");
+          var paragraph = [];
+          var list = null;
+
+          function flushParagraph() {
+            if (paragraph.length) {
+              blocks.push({ kind: "block", type: "paragraph", text: trim(paragraph.join("\n")) });
+              paragraph = [];
+            }
+          }
+          function flushList() {
+            if (list) {
+              blocks.push(list);
+              list = null;
+            }
+          }
+
+          for (var i = 0; i < lines.length; i++) {
+            var line = lines[i].replace(/\s+$/g, "");
+            if (!trim(line)) {
+              flushParagraph();
+              flushList();
+              continue;
+            }
+
+            var heading = /^(#{1,4})\s+(.+)$/.exec(line);
+            if (heading) {
+              flushParagraph();
+              flushList();
+              blocks.push({ kind: "block", type: "heading", level: heading[1].length, text: trim(heading[2]) });
+              continue;
+            }
+
+            var quote = /^>\s?(.+)$/.exec(line);
+            if (quote) {
+              flushParagraph();
+              flushList();
+              blocks.push({ kind: "block", type: "quote", text: trim(quote[1]) });
+              continue;
+            }
+
+            var unordered = /^\s*[-*]\s+(.+)$/.exec(line);
+            var ordered = /^\s*\d+[.)]\s+(.+)$/.exec(line);
+            if (unordered || ordered) {
+              flushParagraph();
+              var isOrdered = !!ordered;
+              if (!list || list.ordered !== isOrdered) {
+                flushList();
+                list = { kind: "list", ordered: isOrdered, items: [] };
+              }
+              list.items.push(trim((ordered && ordered[1]) || (unordered && unordered[1]) || ""));
+              continue;
+            }
+
+            flushList();
+            paragraph.push(line);
+          }
+
+          flushParagraph();
+          flushList();
+          return blocks;
+        }
+
+        function appendInlineMarkdown(target, text) {
+          var tick = String.fromCharCode(96);
+          var pattern = new RegExp("(" + tick + "[^" + tick + "]+" + tick + "|\\*\\*[^*]+\\*\\*)", "g");
+          var lastIndex = 0;
+          var match;
+          while ((match = pattern.exec(text)) !== null) {
+            if (match.index > lastIndex) {
+              target.appendChild(document.createTextNode(text.slice(lastIndex, match.index)));
+            }
+            var token = match[0];
+            var isCode = token.charAt(0) === tick;
+            var el = document.createElement(isCode ? "code" : "strong");
+            el.textContent = isCode ? token.slice(1, -1) : token.slice(2, -2);
+            target.appendChild(el);
+            lastIndex = pattern.lastIndex;
+          }
+          if (lastIndex < text.length) {
+            target.appendChild(document.createTextNode(text.slice(lastIndex)));
+          }
         }
 
         function renderLatestAssistantFromResult(result) {
