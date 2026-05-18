@@ -1511,24 +1511,47 @@ function renderChatText(text: string) {
 
 function parseMarkdownBlocks(text: string): ChatTextPart[] {
   const parts: ChatTextPart[] = [];
-  const pattern = /```([^\n`]*)\n?([\s\S]*?)```/g;
-  let lastIndex = 0;
-  let match: RegExpExecArray | null;
+  const fence = "```";
+  let cursor = 0;
 
-  while ((match = pattern.exec(text)) !== null) {
-    if (match.index > lastIndex) {
-      parts.push(...parseTextBlocks(text.slice(lastIndex, match.index)));
+  while (cursor < text.length) {
+    const fenceStart = text.indexOf(fence, cursor);
+    if (fenceStart === -1) {
+      break;
     }
+
+    if (fenceStart > cursor) {
+      parts.push(...parseTextBlocks(text.slice(cursor, fenceStart)));
+    }
+
+    const infoStart = fenceStart + fence.length;
+    const lineEnd = text.indexOf("\n", infoStart);
+    if (lineEnd === -1) {
+      parts.push({
+        kind: "code",
+        language: text.slice(infoStart).trim() || undefined,
+        code: ""
+      });
+      cursor = text.length;
+      break;
+    }
+
+    const codeStart = lineEnd + 1;
+    const fenceEnd = text.indexOf(fence, codeStart);
     parts.push({
       kind: "code",
-      language: match[1]?.trim() || undefined,
-      code: match[2] ?? ""
+      language: text.slice(infoStart, lineEnd).trim() || undefined,
+      code: fenceEnd === -1 ? text.slice(codeStart) : text.slice(codeStart, fenceEnd)
     });
-    lastIndex = pattern.lastIndex;
+    if (fenceEnd === -1) {
+      cursor = text.length;
+      break;
+    }
+    cursor = fenceEnd + fence.length;
   }
 
-  if (lastIndex < text.length) {
-    parts.push(...parseTextBlocks(text.slice(lastIndex)));
+  if (cursor < text.length) {
+    parts.push(...parseTextBlocks(text.slice(cursor)));
   }
 
   return parts.length ? parts : [{ kind: "block", type: "paragraph", text }];

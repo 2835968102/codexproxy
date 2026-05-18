@@ -782,6 +782,7 @@ export const litePageHtml = String.raw`<!doctype html>
         var currentThreadId = "";
         var currentThreadCwd = "";
         var bubbleByItemId = {};
+        var assistantTextByItemId = {};
         var lastAssistantBubble = null;
         var lastAssistantItemId = "";
         var activeAssistantItemId = "";
@@ -1214,6 +1215,7 @@ export const litePageHtml = String.raw`<!doctype html>
 
         function resetBubbleTracking() {
           bubbleByItemId = {};
+          assistantTextByItemId = {};
           lastAssistantBubble = null;
           lastAssistantItemId = "";
           activeAssistantItemId = "";
@@ -1296,7 +1298,9 @@ export const litePageHtml = String.raw`<!doctype html>
           sendBtn.disabled = true;
           historyLoadSeq++;
           replySyncBaselineId = lastAssistantItemId || "";
-          replySyncBaselineText = lastAssistantBubble ? lastAssistantBubble.textContent || "" : "";
+          replySyncBaselineText =
+            (replySyncBaselineId && assistantTextByItemId[replySyncBaselineId]) ||
+            (lastAssistantBubble ? lastAssistantBubble.textContent || "" : "");
           replySyncStartedAt = Date.now() - 2000;
           activeAssistantItemId = "";
           lastAssistantBubble = null;
@@ -1776,6 +1780,7 @@ export const litePageHtml = String.raw`<!doctype html>
           if (itemId) {
             bubbleByItemId[itemId] = body;
             if (role === "assistant") {
+              assistantTextByItemId[itemId] = text || "";
               lastAssistantBubble = body;
               lastAssistantItemId = itemId;
             }
@@ -1813,17 +1818,28 @@ export const litePageHtml = String.raw`<!doctype html>
 
         function appendAssistantDelta(itemId, delta) {
           if (!delta) return;
+          itemId = itemId || "active";
           var node = ensureAssistantNode(itemId);
-          node.textContent += delta;
+          var text = (assistantTextByItemId[itemId] || "") + delta;
+          assistantTextByItemId[itemId] = text;
+          renderMarkdownInto(node, text);
           scrollChat();
         }
 
         function setAssistantText(itemId, text, fallbackItemId) {
           if (!bubbleByItemId[itemId] && fallbackItemId && bubbleByItemId[fallbackItemId]) {
             bubbleByItemId[itemId] = bubbleByItemId[fallbackItemId];
+            if (assistantTextByItemId[fallbackItemId] !== undefined && assistantTextByItemId[itemId] === undefined) {
+              assistantTextByItemId[itemId] = assistantTextByItemId[fallbackItemId];
+            }
           }
           var node = ensureAssistantNode(itemId);
-          renderMarkdownInto(node, text || "");
+          var nextText = text || "";
+          renderMarkdownInto(node, nextText);
+          assistantTextByItemId[itemId] = nextText;
+          if (fallbackItemId && fallbackItemId !== itemId) {
+            assistantTextByItemId[fallbackItemId] = nextText;
+          }
           activeAssistantItemId = itemId;
           lastAssistantBubble = node;
           lastAssistantItemId = itemId;
@@ -1874,22 +1890,39 @@ export const litePageHtml = String.raw`<!doctype html>
         function parseMarkdownBlocks(text) {
           var parts = [];
           var fence = String.fromCharCode(96, 96, 96);
-          var pattern = new RegExp(fence + "([^\\n]*)\\n?([\\s\\S]*?)" + fence, "g");
-          var lastIndex = 0;
-          var match;
-          while ((match = pattern.exec(text)) !== null) {
-            if (match.index > lastIndex) {
-              parts = parts.concat(parseTextBlocks(text.slice(lastIndex, match.index)));
+          var cursor = 0;
+          while (cursor < text.length) {
+            var fenceStart = text.indexOf(fence, cursor);
+            if (fenceStart === -1) break;
+            if (fenceStart > cursor) {
+              parts = parts.concat(parseTextBlocks(text.slice(cursor, fenceStart)));
             }
+            var infoStart = fenceStart + fence.length;
+            var lineEnd = text.indexOf("\n", infoStart);
+            if (lineEnd === -1) {
+              parts.push({
+                kind: "code",
+                language: trim(text.slice(infoStart)),
+                code: ""
+              });
+              cursor = text.length;
+              break;
+            }
+            var codeStart = lineEnd + 1;
+            var fenceEnd = text.indexOf(fence, codeStart);
             parts.push({
               kind: "code",
-              language: trim(match[1] || ""),
-              code: match[2] || ""
+              language: trim(text.slice(infoStart, lineEnd)),
+              code: fenceEnd === -1 ? text.slice(codeStart) : text.slice(codeStart, fenceEnd)
             });
-            lastIndex = pattern.lastIndex;
+            if (fenceEnd === -1) {
+              cursor = text.length;
+              break;
+            }
+            cursor = fenceEnd + fence.length;
           }
-          if (lastIndex < text.length) {
-            parts = parts.concat(parseTextBlocks(text.slice(lastIndex)));
+          if (cursor < text.length) {
+            parts = parts.concat(parseTextBlocks(text.slice(cursor)));
           }
           return parts.length ? parts : [{ kind: "block", type: "paragraph", text: text }];
         }
