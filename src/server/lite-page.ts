@@ -133,16 +133,47 @@ export const litePageHtml = String.raw`<!doctype html>
       .chat-app {
         flex: 1;
         min-height: 0;
-        display: flex;
-        flex-direction: column;
+        display: grid;
+        grid-template-columns: minmax(260px, 320px) minmax(0, 1fr);
+        grid-template-areas:
+          "sidebar chatHead"
+          "sidebar work"
+          "sidebar chatLog"
+          "sidebar composer"
+          "sidebar debug";
+        align-items: start;
+        gap: 12px;
+        padding: 10px 14px 0;
       }
       .thread-panel {
-        margin: 10px 14px 0;
+        grid-area: sidebar;
+        position: sticky;
+        top: 66px;
+        max-height: calc(100vh - 80px);
+        overflow-y: auto;
+        margin: 0;
         border: 1px solid #dedbd2;
         border-radius: 10px;
         background: #fff;
       }
       .thread-panel summary {
+        display: none;
+      }
+      .thread-titlebar {
+        display: grid;
+        gap: 3px;
+        padding: 12px 12px 8px;
+        border-bottom: 1px solid #e8e5dc;
+        color: #36332e;
+      }
+      .thread-titlebar strong {
+        font-size: 17px;
+      }
+      .thread-titlebar span {
+        color: #746f67;
+        font-size: 12px;
+      }
+      .thread-panel > summary {
         cursor: pointer;
         padding: 11px 12px;
         color: #36332e;
@@ -151,13 +182,16 @@ export const litePageHtml = String.raw`<!doctype html>
       .thread-body {
         display: grid;
         gap: 12px;
-        padding: 0 12px 12px;
+        padding: 12px;
       }
       .thread-tools {
         display: grid;
-        grid-template-columns: 1fr auto auto;
+        grid-template-columns: 1fr 1fr;
         gap: 8px;
         align-items: end;
+      }
+      .thread-tools label {
+        grid-column: 1 / -1;
       }
       .workspace-list {
         display: grid;
@@ -258,9 +292,10 @@ export const litePageHtml = String.raw`<!doctype html>
         font-size: 12px;
       }
       .chat-head {
+        grid-area: chatHead;
         display: grid;
         gap: 4px;
-        margin: 10px 14px 0;
+        margin: 0;
         padding: 10px 12px;
         border: 1px solid #dedbd2;
         border-radius: 10px;
@@ -282,7 +317,8 @@ export const litePageHtml = String.raw`<!doctype html>
       .work-panel {
         display: none;
         gap: 10px;
-        margin: 10px 14px 0;
+        grid-area: work;
+        margin: 0;
         padding: 10px 12px;
         border: 1px solid #dedbd2;
         border-radius: 10px;
@@ -384,6 +420,7 @@ export const litePageHtml = String.raw`<!doctype html>
         overflow: auto;
       }
       .chat-log {
+        grid-area: chatLog;
         flex: 1;
         min-height: 320px;
         overflow-y: auto;
@@ -444,6 +481,7 @@ export const litePageHtml = String.raw`<!doctype html>
         position: sticky;
         bottom: 0;
         z-index: 3;
+        grid-area: composer;
         display: grid;
         grid-template-columns: 1fr auto;
         gap: 8px;
@@ -535,7 +573,8 @@ export const litePageHtml = String.raw`<!doctype html>
         box-shadow: 0 8px 24px rgba(0, 0, 0, 0.18);
       }
       .debug {
-        margin: 0 14px 14px;
+        grid-area: debug;
+        margin: 0 0 14px;
         border: 1px solid #dedbd2;
         border-radius: 10px;
         background: #fff;
@@ -564,13 +603,27 @@ export const litePageHtml = String.raw`<!doctype html>
       @media (max-width: 640px) {
         .shell { width: 100%; }
         .panel { margin: 12px; }
-        .thread-panel { margin: 8px 12px 0; }
+        .chat-app {
+          display: flex;
+          flex-direction: column;
+          padding: 0;
+        }
+        .thread-panel {
+          position: static;
+          max-height: none;
+          margin: 8px 12px 0;
+        }
+        .thread-panel summary {
+          display: block;
+        }
+        .thread-titlebar { display: none; }
         .thread-tools { grid-template-columns: 1fr; }
         .workspace-head { grid-template-columns: auto minmax(0, 1fr) auto; }
         .workspace-count { display: none; }
         .chat-head { margin: 8px 12px 0; }
         .work-panel { margin: 8px 12px 0; }
         .chat-log { padding: 12px; }
+        .debug { margin: 0 12px 12px; }
         .bubble { max-width: 92%; }
         .bottom-btn {
           right: 14px;
@@ -604,6 +657,10 @@ export const litePageHtml = String.raw`<!doctype html>
       <section id="chatApp" class="chat-app hidden">
         <details class="thread-panel" open>
           <summary>工作目录与对话</summary>
+          <div class="thread-titlebar">
+            <strong>项目</strong>
+            <span>按工作目录折叠或打开对话</span>
+          </div>
           <div class="thread-body">
             <div class="thread-tools">
               <label>新对话工作目录
