@@ -484,6 +484,8 @@ export const litePageHtml = String.raw`<!doctype html>
       .bubble-body blockquote,
       .bubble-body ul,
       .bubble-body ol,
+      .bubble-body table,
+      .bubble-body hr,
       .bubble-body h1,
       .bubble-body h2,
       .bubble-body h3,
@@ -507,6 +509,35 @@ export const litePageHtml = String.raw`<!doctype html>
       .bubble-body ol {
         padding-left: 22px;
       }
+      .bubble-body a {
+        color: #276a8f;
+        text-underline-offset: 2px;
+        word-break: break-all;
+      }
+      .bubble.user .bubble-body a {
+        color: #d9eefb;
+      }
+      .bubble-body hr {
+        width: 100%;
+        border: 0;
+        border-top: 1px solid #dedbd2;
+      }
+      .bubble-body .task-list {
+        list-style: none;
+        padding-left: 0;
+      }
+      .bubble-body .task-list-item {
+        display: grid;
+        grid-template-columns: 16px minmax(0, 1fr);
+        gap: 8px;
+        align-items: start;
+      }
+      .bubble-body .task-list-item input {
+        margin: 3px 0 0;
+        width: 14px;
+        height: 14px;
+        accent-color: #2f7d54;
+      }
       .bubble-body blockquote {
         border-left: 3px solid #b8c4b2;
         color: #5f5a52;
@@ -528,12 +559,29 @@ export const litePageHtml = String.raw`<!doctype html>
         border-radius: 8px;
         background: #121512;
       }
-      .bubble-code-lang {
-        display: block;
+      .bubble-code-head {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 8px;
         border-bottom: 1px solid rgba(255, 255, 255, 0.12);
+        padding: 6px 8px 6px 10px;
+      }
+      .bubble-code-lang {
         color: #aab4a6;
         font-size: 12px;
-        padding: 6px 10px;
+      }
+      .bubble-code-copy {
+        min-height: 24px;
+        border-radius: 6px;
+        border-color: rgba(255, 255, 255, 0.18);
+        background: rgba(255, 255, 255, 0.08);
+        color: #f4f6ef;
+        padding: 2px 8px;
+        font-size: 12px;
+      }
+      .bubble-code-copy:hover {
+        background: rgba(255, 255, 255, 0.14);
       }
       .bubble-code pre {
         margin: 0;
@@ -543,6 +591,36 @@ export const litePageHtml = String.raw`<!doctype html>
         color: #f4f6ef;
         padding: 10px;
         font: 12px/1.55 Consolas, ui-monospace, monospace;
+      }
+      .bubble-table-wrap {
+        max-width: 100%;
+        overflow-x: auto;
+        border: 1px solid #dedbd2;
+        border-radius: 8px;
+      }
+      .bubble-table {
+        width: 100%;
+        min-width: 360px;
+        border-collapse: collapse;
+        background: rgba(255, 255, 255, 0.42);
+        font-size: 13px;
+      }
+      .bubble-table th,
+      .bubble-table td {
+        border-bottom: 1px solid #e5e0d6;
+        padding: 7px 9px;
+        text-align: left;
+        vertical-align: top;
+        white-space: normal;
+        word-break: break-word;
+      }
+      .bubble-table th {
+        background: rgba(47, 125, 84, 0.08);
+        color: #2b3028;
+        font-weight: 700;
+      }
+      .bubble-table tr:last-child td {
+        border-bottom: 0;
       }
       .composer {
         position: sticky;
@@ -1858,12 +1936,30 @@ export const litePageHtml = String.raw`<!doctype html>
           if (part.kind === "code") {
             var codeWrap = document.createElement("div");
             codeWrap.className = "bubble-code";
+            var head = document.createElement("div");
+            head.className = "bubble-code-head";
             if (part.language) {
               var lang = document.createElement("span");
               lang.className = "bubble-code-lang";
               lang.textContent = part.language;
-              codeWrap.appendChild(lang);
+              head.appendChild(lang);
+            } else {
+              head.appendChild(document.createElement("span"));
             }
+            var copy = document.createElement("button");
+            copy.type = "button";
+            copy.className = "bubble-code-copy";
+            copy.textContent = "复制";
+            copy.addEventListener("click", function () {
+              copyTextToClipboard(part.code || "", function () {
+                copy.textContent = "已复制";
+                setTimeout(function () {
+                  copy.textContent = "复制";
+                }, 1200);
+              });
+            });
+            head.appendChild(copy);
+            codeWrap.appendChild(head);
             var pre = document.createElement("pre");
             pre.textContent = part.code || "";
             codeWrap.appendChild(pre);
@@ -1872,12 +1968,65 @@ export const litePageHtml = String.raw`<!doctype html>
           }
           if (part.kind === "list") {
             var list = document.createElement(part.ordered ? "ol" : "ul");
+            var hasTasks = false;
+            for (var taskIndex = 0; taskIndex < part.items.length; taskIndex++) {
+              if (part.items[taskIndex].checked !== undefined) hasTasks = true;
+            }
+            if (hasTasks) list.className = "task-list";
             for (var i = 0; i < part.items.length; i++) {
               var li = document.createElement("li");
-              appendInlineMarkdown(li, part.items[i]);
+              if (part.items[i].checked !== undefined) {
+                li.className = "task-list-item";
+                var checkbox = document.createElement("input");
+                checkbox.type = "checkbox";
+                checkbox.checked = !!part.items[i].checked;
+                checkbox.readOnly = true;
+                checkbox.tabIndex = -1;
+                li.appendChild(checkbox);
+                var label = document.createElement("span");
+                appendInlineMarkdown(label, part.items[i].text || "");
+                li.appendChild(label);
+              } else {
+                appendInlineMarkdown(li, part.items[i].text || "");
+              }
               list.appendChild(li);
             }
             target.appendChild(list);
+            return;
+          }
+          if (part.kind === "table") {
+            var tableWrap = document.createElement("div");
+            tableWrap.className = "bubble-table-wrap";
+            var table = document.createElement("table");
+            table.className = "bubble-table";
+            var thead = document.createElement("thead");
+            var headRow = document.createElement("tr");
+            for (var h = 0; h < part.headers.length; h++) {
+              var th = document.createElement("th");
+              applyTableAlign(th, part.aligns[h]);
+              appendInlineMarkdown(th, part.headers[h] || "");
+              headRow.appendChild(th);
+            }
+            thead.appendChild(headRow);
+            table.appendChild(thead);
+            var tbody = document.createElement("tbody");
+            for (var r = 0; r < part.rows.length; r++) {
+              var row = document.createElement("tr");
+              for (var c = 0; c < part.headers.length; c++) {
+                var td = document.createElement("td");
+                applyTableAlign(td, part.aligns[c]);
+                appendInlineMarkdown(td, (part.rows[r] && part.rows[r][c]) || "");
+                row.appendChild(td);
+              }
+              tbody.appendChild(row);
+            }
+            table.appendChild(tbody);
+            tableWrap.appendChild(table);
+            target.appendChild(tableWrap);
+            return;
+          }
+          if (part.kind === "rule") {
+            target.appendChild(document.createElement("hr"));
             return;
           }
 
@@ -1954,6 +2103,34 @@ export const litePageHtml = String.raw`<!doctype html>
               continue;
             }
 
+            var nextLine = lines[i + 1] ? lines[i + 1].replace(/\s+$/g, "") : "";
+            if (nextLine && isTableDivider(nextLine) && splitTableRow(line).length > 1) {
+              flushParagraph();
+              flushList();
+              var headers = splitTableRow(line);
+              var aligns = tableAlignsFromDivider(nextLine, headers.length);
+              var rows = [];
+              i += 2;
+              while (i < lines.length) {
+                var tableLine = lines[i].replace(/\s+$/g, "");
+                if (!trim(tableLine) || !isTableRow(tableLine)) {
+                  i--;
+                  break;
+                }
+                rows.push(normalizeTableCells(splitTableRow(tableLine), headers.length));
+                i++;
+              }
+              blocks.push({ kind: "table", headers: headers, rows: rows, aligns: aligns });
+              continue;
+            }
+
+            if (/^\s{0,3}([-*_])(?:\s*\1){2,}\s*$/.test(line)) {
+              flushParagraph();
+              flushList();
+              blocks.push({ kind: "rule" });
+              continue;
+            }
+
             var heading = /^(#{1,4})\s+(.+)$/.exec(line);
             if (heading) {
               flushParagraph();
@@ -1979,7 +2156,7 @@ export const litePageHtml = String.raw`<!doctype html>
                 flushList();
                 list = { kind: "list", ordered: isOrdered, items: [] };
               }
-              list.items.push(trim((ordered && ordered[1]) || (unordered && unordered[1]) || ""));
+              list.items.push(parseListItem((ordered && ordered[1]) || (unordered && unordered[1]) || "", !!unordered));
               continue;
             }
 
@@ -1994,7 +2171,7 @@ export const litePageHtml = String.raw`<!doctype html>
 
         function appendInlineMarkdown(target, text) {
           var tick = String.fromCharCode(96);
-          var pattern = new RegExp("(" + tick + "[^" + tick + "]+" + tick + "|\\*\\*[^*]+\\*\\*)", "g");
+          var pattern = new RegExp("(" + tick + "[^" + tick + "]+" + tick + "|\\*\\*[^*]+\\*\\*|\\[[^\\]\\n]+\\]\\([^\\s)]+(?:\\s+\"[^\"]*\")?\\))", "g");
           var lastIndex = 0;
           var match;
           while ((match = pattern.exec(text)) !== null) {
@@ -2003,14 +2180,121 @@ export const litePageHtml = String.raw`<!doctype html>
             }
             var token = match[0];
             var isCode = token.charAt(0) === tick;
-            var el = document.createElement(isCode ? "code" : "strong");
-            el.textContent = isCode ? token.slice(1, -1) : token.slice(2, -2);
-            target.appendChild(el);
+            if (isCode) {
+              var code = document.createElement("code");
+              code.textContent = token.slice(1, -1);
+              target.appendChild(code);
+            } else if (token.charAt(0) === "[") {
+              var link = /^\[([^\]\n]+)\]\(([^\s)]+)(?:\s+"[^"]*")?\)$/.exec(token);
+              var href = link ? safeLinkHref(link[2]) : "";
+              if (link && href) {
+                var anchor = document.createElement("a");
+                anchor.href = href;
+                anchor.target = "_blank";
+                anchor.rel = "noreferrer";
+                anchor.textContent = link[1];
+                target.appendChild(anchor);
+              } else {
+                target.appendChild(document.createTextNode(token));
+              }
+            } else {
+              var strong = document.createElement("strong");
+              strong.textContent = token.slice(2, -2);
+              target.appendChild(strong);
+            }
             lastIndex = pattern.lastIndex;
           }
           if (lastIndex < text.length) {
             target.appendChild(document.createTextNode(text.slice(lastIndex)));
           }
+        }
+
+        function parseListItem(value, allowTask) {
+          var task = allowTask ? /^\[([ xX])\]\s+(.+)$/.exec(trim(value)) : null;
+          if (task) {
+            return {
+              text: trim(task[2]),
+              checked: task[1].toLowerCase() === "x"
+            };
+          }
+          return { text: trim(value) };
+        }
+
+        function splitTableRow(line) {
+          var value = trim(line);
+          if (value.charAt(0) === "|") value = value.slice(1);
+          if (value.charAt(value.length - 1) === "|") value = value.slice(0, -1);
+          return value.split("|").map(function (cell) {
+            return trim(cell);
+          });
+        }
+
+        function isTableRow(line) {
+          return line.indexOf("|") !== -1 && splitTableRow(line).length > 1;
+        }
+
+        function isTableDivider(line) {
+          var cells = splitTableRow(line);
+          if (cells.length <= 1) return false;
+          for (var i = 0; i < cells.length; i++) {
+            if (!/^:?-{3,}:?$/.test(cells[i].replace(/\s+/g, ""))) return false;
+          }
+          return true;
+        }
+
+        function tableAlignsFromDivider(line, width) {
+          var cells = normalizeTableCells(splitTableRow(line), width);
+          return cells.map(function (cell) {
+            var value = cell.replace(/\s+/g, "");
+            if (value.charAt(0) === ":" && value.charAt(value.length - 1) === ":") return "center";
+            if (value.charAt(value.length - 1) === ":") return "right";
+            if (value.charAt(0) === ":") return "left";
+            return undefined;
+          });
+        }
+
+        function normalizeTableCells(cells, width) {
+          var result = [];
+          for (var i = 0; i < width; i++) {
+            result.push(cells[i] || "");
+          }
+          return result;
+        }
+
+        function applyTableAlign(cell, align) {
+          if (align) cell.style.textAlign = align;
+        }
+
+        function safeLinkHref(href) {
+          var value = trim(href || "");
+          if (/^(https?:|mailto:|tel:)/i.test(value) || value.charAt(0) === "/" || value.charAt(0) === "#") {
+            return value;
+          }
+          return "";
+        }
+
+        function copyTextToClipboard(text, done) {
+          if (navigator.clipboard && navigator.clipboard.writeText) {
+            navigator.clipboard.writeText(text).then(done).catch(function () {
+              fallbackCopyText(text);
+              done();
+            });
+            return;
+          }
+          fallbackCopyText(text);
+          done();
+        }
+
+        function fallbackCopyText(text) {
+          var textarea = document.createElement("textarea");
+          textarea.value = text;
+          textarea.setAttribute("readonly", "");
+          textarea.style.position = "fixed";
+          textarea.style.left = "-9999px";
+          document.body.appendChild(textarea);
+          textarea.select();
+          document.execCommand("copy");
+          document.body.removeChild(textarea);
         }
 
         function renderLatestAssistantFromResult(result) {

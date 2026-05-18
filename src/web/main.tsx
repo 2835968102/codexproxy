@@ -1474,8 +1474,17 @@ function labelForRole(role: ChatHistoryMessage["role"]) {
 
 type ChatTextPart =
   | { kind: "block"; type: "paragraph" | "heading" | "quote"; text: string; level?: number }
-  | { kind: "list"; ordered: boolean; items: string[] }
+  | { kind: "rule" }
+  | { kind: "list"; ordered: boolean; items: ChatListItem[] }
+  | { kind: "table"; headers: string[]; rows: string[][]; aligns: ChatTableAlign[] }
   | { kind: "code"; code: string; language?: string };
+
+type ChatListItem = {
+  text: string;
+  checked?: boolean;
+};
+
+type ChatTableAlign = "left" | "center" | "right" | undefined;
 
 function renderChatText(text: string) {
   const parts = parseMarkdownBlocks(text);
@@ -1483,20 +1492,58 @@ function renderChatText(text: string) {
     if (part.kind === "code") {
       return (
         <div className="chat-code" key={index}>
-          {part.language && <span className="chat-code-lang">{part.language}</span>}
+          <div className="chat-code-head">
+            {part.language ? <span className="chat-code-lang">{part.language}</span> : <span />}
+            <CodeCopyButton code={part.code} />
+          </div>
           <pre>{part.code}</pre>
         </div>
       );
     }
     if (part.kind === "list") {
       const Tag = part.ordered ? "ol" : "ul";
+      const taskList = part.items.some((item) => item.checked !== undefined);
       return (
-        <Tag key={index}>
+        <Tag className={taskList ? "task-list" : undefined} key={index}>
           {part.items.map((item, itemIndex) => (
-            <li key={itemIndex}>{renderInlineMarkdown(item)}</li>
+            <li className={item.checked !== undefined ? "task-list-item" : undefined} key={itemIndex}>
+              {item.checked !== undefined && <input type="checkbox" checked={item.checked} readOnly tabIndex={-1} />}
+              <span>{renderInlineMarkdown(item.text)}</span>
+            </li>
           ))}
         </Tag>
       );
+    }
+    if (part.kind === "table") {
+      return (
+        <div className="chat-table-wrap" key={index}>
+          <table className="chat-table">
+            <thead>
+              <tr>
+                {part.headers.map((header, headerIndex) => (
+                  <th key={headerIndex} style={styleForTableAlign(part.aligns[headerIndex])}>
+                    {renderInlineMarkdown(header)}
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {part.rows.map((row, rowIndex) => (
+                <tr key={rowIndex}>
+                  {row.map((cell, cellIndex) => (
+                    <td key={cellIndex} style={styleForTableAlign(part.aligns[cellIndex])}>
+                      {renderInlineMarkdown(cell)}
+                    </td>
+                  ))}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      );
+    }
+    if (part.kind === "rule") {
+      return <hr key={index} />;
     }
     if (part.type === "heading") {
       const Tag = `h${Math.min(Math.max(part.level ?? 3, 1), 4)}` as "h1" | "h2" | "h3" | "h4";
@@ -1561,7 +1608,7 @@ function parseTextBlocks(text: string): ChatTextPart[] {
   const blocks: ChatTextPart[] = [];
   const lines = text.replace(/\r\n/g, "\n").split("\n");
   let paragraph: string[] = [];
-  let list: { ordered: boolean; items: string[] } | null = null;
+  let list: { ordered: boolean; items: ChatListItem[] } | null = null;
 
   const flushParagraph = () => {
     if (paragraph.length) {
@@ -1576,11 +1623,40 @@ function parseTextBlocks(text: string): ChatTextPart[] {
     }
   };
 
-  for (const rawLine of lines) {
+  for (let index = 0; index < lines.length; index++) {
+    const rawLine = lines[index]!;
     const line = rawLine.trimEnd();
     if (!line.trim()) {
       flushParagraph();
       flushList();
+      continue;
+    }
+
+    const nextLine = lines[index + 1]?.trimEnd();
+    if (nextLine && isTableDivider(nextLine) && splitTableRow(line).length > 1) {
+      flushParagraph();
+      flushList();
+      const headers = splitTableRow(line);
+      const aligns = tableAlignsFromDivider(nextLine, headers.length);
+      const rows: string[][] = [];
+      index += 2;
+      while (index < lines.length) {
+        const tableLine = lines[index]!.trimEnd();
+        if (!tableLine.trim() || !isTableRow(tableLine)) {
+          index--;
+          break;
+        }
+        rows.push(normalizeTableCells(splitTableRow(tableLine), headers.length));
+        index++;
+      }
+      blocks.push({ kind: "table", headers, rows, aligns });
+      continue;
+    }
+
+    if (/^\s{0,3}([-*_])(?:\s*\1){2,}\s*$/.test(line)) {
+      flushParagraph();
+      flushList();
+      blocks.push({ kind: "rule" });
       continue;
     }
 
@@ -1609,7 +1685,7 @@ function parseTextBlocks(text: string): ChatTextPart[] {
         flushList();
         list = { ordered: isOrdered, items: [] };
       }
-      list.items.push((ordered?.[1] ?? unordered?.[1] ?? "").trim());
+      list.items.push(parseListItem(ordered?.[1] ?? unordered?.[1] ?? "", Boolean(unordered)));
       continue;
     }
 
@@ -1624,7 +1700,7 @@ function parseTextBlocks(text: string): ChatTextPart[] {
 
 function renderInlineMarkdown(text: string) {
   const nodes: React.ReactNode[] = [];
-  const pattern = /(`[^`]+`|\*\*[^*]+\*\*)/g;
+  const pattern = /(`[^`]+`|\*\*[^*]+\*\*|\[[^\]\n]+\]\([^\s)]+(?:\s+"[^"]*")?\))/g;
   let lastIndex = 0;
   let match: RegExpExecArray | null;
 
@@ -1635,6 +1711,18 @@ function renderInlineMarkdown(text: string) {
     const token = match[0];
     if (token.startsWith("`")) {
       nodes.push(<code key={nodes.length}>{token.slice(1, -1)}</code>);
+    } else if (token.startsWith("[")) {
+      const link = /^\[([^\]\n]+)\]\(([^\s)]+)(?:\s+"[^"]*")?\)$/.exec(token);
+      const href = link ? safeLinkHref(link[2]!) : undefined;
+      if (link && href) {
+        nodes.push(
+          <a href={href} key={nodes.length} rel="noreferrer" target="_blank">
+            {link[1]}
+          </a>
+        );
+      } else {
+        nodes.push(token);
+      }
     } else {
       nodes.push(<strong key={nodes.length}>{token.slice(2, -2)}</strong>);
     }
@@ -1645,6 +1733,92 @@ function renderInlineMarkdown(text: string) {
     nodes.push(text.slice(lastIndex));
   }
   return nodes;
+}
+
+function parseListItem(value: string, allowTask: boolean): ChatListItem {
+  const task = allowTask ? /^\[([ xX])\]\s+(.+)$/.exec(value.trim()) : null;
+  if (task) {
+    return {
+      text: task[2]!.trim(),
+      checked: task[1]!.toLowerCase() === "x"
+    };
+  }
+  return { text: value.trim() };
+}
+
+function splitTableRow(line: string) {
+  let value = line.trim();
+  if (value.startsWith("|")) value = value.slice(1);
+  if (value.endsWith("|")) value = value.slice(0, -1);
+  return value.split("|").map((cell) => cell.trim());
+}
+
+function isTableRow(line: string) {
+  return line.includes("|") && splitTableRow(line).length > 1;
+}
+
+function isTableDivider(line: string) {
+  const cells = splitTableRow(line);
+  return cells.length > 1 && cells.every((cell) => /^:?-{3,}:?$/.test(cell.replace(/\s+/g, "")));
+}
+
+function tableAlignsFromDivider(line: string, width: number): ChatTableAlign[] {
+  return normalizeTableCells(splitTableRow(line), width).map((cell) => {
+    const value = cell.replace(/\s+/g, "");
+    if (value.startsWith(":") && value.endsWith(":")) return "center";
+    if (value.endsWith(":")) return "right";
+    if (value.startsWith(":")) return "left";
+    return undefined;
+  });
+}
+
+function normalizeTableCells(cells: string[], width: number) {
+  return Array.from({ length: width }, (_, index) => cells[index] ?? "");
+}
+
+function styleForTableAlign(align: ChatTableAlign): React.CSSProperties | undefined {
+  return align ? { textAlign: align } : undefined;
+}
+
+function safeLinkHref(href: string) {
+  const value = href.trim();
+  if (/^(https?:|mailto:|tel:)/i.test(value) || value.startsWith("/") || value.startsWith("#")) {
+    return value;
+  }
+  return undefined;
+}
+
+function CodeCopyButton({ code }: { code: string }) {
+  const [copied, setCopied] = useState(false);
+
+  async function copyCode() {
+    await copyTextToClipboard(code);
+    setCopied(true);
+    window.setTimeout(() => setCopied(false), 1200);
+  }
+
+  return (
+    <button className="chat-code-copy" onClick={copyCode} type="button">
+      {copied ? "已复制" : "复制"}
+    </button>
+  );
+}
+
+async function copyTextToClipboard(text: string) {
+  if (navigator.clipboard?.writeText) {
+    await navigator.clipboard.writeText(text);
+    return;
+  }
+
+  const textarea = document.createElement("textarea");
+  textarea.value = text;
+  textarea.setAttribute("readonly", "");
+  textarea.style.position = "fixed";
+  textarea.style.left = "-9999px";
+  document.body.appendChild(textarea);
+  textarea.select();
+  document.execCommand("copy");
+  document.body.removeChild(textarea);
 }
 
 function readWorkspaceOpenState(): Record<string, boolean> {
