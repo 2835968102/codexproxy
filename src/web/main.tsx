@@ -6,6 +6,12 @@ import {
   SessionSummary,
   createEnvelope
 } from "../shared/protocol.js";
+import {
+  ChatHistoryMessage,
+  messagesFromCodexEvent,
+  messagesFromThreadHistory,
+  turnsFromThreadHistory
+} from "../shared/thread-history.js";
 import { activeTurnIdFromTurns, buildTurnSendRequest } from "../shared/turn-routing.js";
 import "./styles.css";
 
@@ -14,6 +20,10 @@ type LogItem = {
   ts: number;
   kind: string;
   body: unknown;
+};
+
+type ReplyItem = LogItem & {
+  role: ChatHistoryMessage["role"];
 };
 
 type ActivityState = "running" | "waiting" | "done" | "error";
@@ -71,7 +81,7 @@ function App() {
   const [sessions, setSessions] = useState<SessionSummary[]>([]);
   const [activeSession, setActiveSession] = useState<SessionSummary | undefined>();
   const [logs, setLogs] = useState<LogItem[]>([]);
-  const [replies, setReplies] = useState<LogItem[]>([]);
+  const [replies, setReplies] = useState<ReplyItem[]>([]);
   const [activities, setActivities] = useState<ActivityItem[]>([]);
   const [workStatus, setWorkStatus] = useState<WorkStatus>(idleWorkStatus);
   const [threads, setThreads] = useState<ThreadSummary[]>([]);
@@ -163,6 +173,36 @@ function App() {
       }
       return [{ id, ts, ...seed, detail: shortenText(detail, 1800) }, ...items].slice(0, 60);
     });
+  }
+
+  function appendReplyMessage(message: ChatHistoryMessage, fallbackId: string) {
+    if (!message.text) {
+      return;
+    }
+
+    const id = message.id || fallbackId;
+    setReplies((items) => upsertReplyItems(items, {
+      id,
+      ts: timestampToMs(message.timestamp) || Date.now(),
+      kind: labelForRole(message.role),
+      role: message.role,
+      body: message.text
+    }));
+  }
+
+  function replaceRepliesFromHistory(thread: unknown) {
+    const messages = messagesFromThreadHistory(thread);
+    setReplies(
+      messages
+        .map((message, index) => ({
+          id: message.id || `history-${index}`,
+          ts: timestampToMs(message.timestamp) || Date.now(),
+          kind: labelForRole(message.role),
+          role: message.role,
+          body: message.text
+        }))
+        .slice(-80)
+    );
   }
 
   function connect(event?: FormEvent) {
@@ -322,7 +362,17 @@ function App() {
     const msg = message as any;
     const selectedThreadId = currentThreadIdRef.current;
     if (msg?.params?.threadId && selectedThreadId && msg.params.threadId !== selectedThreadId) {
+      addLog("debug", {
+        reason: "ignored by selected thread filter",
+        eventThreadId: msg.params.threadId,
+        selectedThreadId,
+        method: msg.method
+      });
       return;
+    }
+
+    for (const chatMessage of messagesFromCodexEvent(message)) {
+      appendReplyMessage(chatMessage, `${msg?.method ?? "event"}:${Date.now()}`);
     }
 
     if (msg?.method === "item/agentMessage/delta") {
@@ -340,24 +390,8 @@ function App() {
             item.id === itemId ? { ...item, body: String(item.body ?? "") + delta } : item
           );
         }
-        return [...items, { id: itemId, ts: Date.now(), kind: "Codex", body: delta }].slice(-40);
-      });
-    }
-
-    if (msg?.method === "item/completed" && msg.params?.item?.type === "agentMessage") {
-      const item = msg.params.item;
-      setReplies((items) => {
-        const existing =
-          items.find((reply) => reply.id === item.id) ??
-          (activeReplyIdRef.current ? items.find((reply) => reply.id === activeReplyIdRef.current) : undefined);
-        if (existing) {
-          activeReplyIdRef.current = item.id;
-          return items.map((reply) =>
-            reply.id === existing.id ? { ...reply, id: item.id, body: item.text } : reply
-          );
-        }
-        activeReplyIdRef.current = item.id;
-        return [...items, { id: item.id, ts: Date.now(), kind: "Codex", body: item.text }].slice(-40);
+        const next: ReplyItem = { id: itemId, ts: Date.now(), kind: "Codex", role: "assistant", body: delta };
+        return [...items, next].slice(-80);
       });
     }
   }
@@ -683,6 +717,26 @@ function App() {
     }
   }
 
+  async function loadThreadHistory(threadId: string) {
+    try {
+      const response = await rpc("thread.read", { threadId, includeTurns: true });
+      if (!response.ok) {
+        throw new Error(response.error);
+      }
+
+      const turns = turnsFromThreadHistory(response.result);
+      const turnId = activeTurnIdFromTurns(turns);
+      if (turnId) {
+        currentTurnByThread.current.set(threadId, turnId);
+      } else {
+        currentTurnByThread.current.delete(threadId);
+      }
+      replaceRepliesFromHistory(response.result);
+    } catch (error) {
+      addLog("error", error instanceof Error ? error.message : error);
+    }
+  }
+
   async function sendPrompt(event: FormEvent) {
     event.preventDefault();
     if (!prompt.trim()) {
@@ -696,9 +750,10 @@ function App() {
     activeReplyIdRef.current = undefined;
     setActivities([]);
     setWork("thinking", "等待 Codex 开始处理", "请求已发出，正在等待 Codex 事件流。");
-    setReplies((items) =>
-      [...items, { id: userReplyId, ts: Date.now(), kind: "你", body: submittedPrompt }].slice(-40)
-    );
+    setReplies((items) => {
+      const next: ReplyItem = { id: userReplyId, ts: Date.now(), kind: "你", role: "user", body: submittedPrompt };
+      return [...items, next].slice(-80);
+    });
     try {
       let sentThreadId = currentThreadId;
       if (currentThreadId) {
@@ -727,6 +782,7 @@ function App() {
         if (threadId) {
           sentThreadId = threadId;
           setCurrentThreadId(threadId);
+          replaceRepliesFromHistory(response.result);
         }
       }
 
@@ -749,6 +805,7 @@ function App() {
   async function startNewThread() {
     setCurrentThreadId("");
     setPrompt("");
+    setReplies([]);
   }
 
   function selectThread(thread: ThreadSummary) {
@@ -757,13 +814,14 @@ function App() {
     if (nextCwd) {
       setCwd(nextCwd);
     }
-    void refreshActiveTurn(thread.id);
+    void loadThreadHistory(thread.id);
   }
 
   function startThreadInWorkspace(nextCwd: string) {
     setCurrentThreadId("");
     setCwd(nextCwd);
     setPrompt("");
+    setReplies([]);
   }
 
   function toggleWorkspace(key: string) {
@@ -1345,6 +1403,26 @@ function timestampToMs(value: unknown) {
     return Number.isNaN(parsed) ? 0 : parsed;
   }
   return 0;
+}
+
+function upsertReplyItems(items: ReplyItem[], next: ReplyItem) {
+  const existingIndex = items.findIndex((item) => item.id === next.id);
+  if (existingIndex >= 0) {
+    const updated = items.slice();
+    updated[existingIndex] = { ...updated[existingIndex]!, ...next };
+    return updated.slice(-80);
+  }
+  return [...items, next].slice(-80);
+}
+
+function labelForRole(role: ChatHistoryMessage["role"]) {
+  if (role === "user") {
+    return "你";
+  }
+  if (role === "assistant") {
+    return "Codex";
+  }
+  return "系统";
 }
 
 function readWorkspaceOpenState(): Record<string, boolean> {

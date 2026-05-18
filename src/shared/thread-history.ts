@@ -8,22 +8,43 @@ export type ChatHistoryMessage = {
 };
 
 export function messagesFromThreadHistory(thread: unknown): ChatHistoryMessage[] {
-  const turns = isRecord(thread) && Array.isArray(thread.turns) ? thread.turns : [];
-  return turns
+  return turnsFromThreadHistory(thread)
     .slice()
     .sort(compareTurns)
     .flatMap((turn) => {
       if (!isRecord(turn) || !Array.isArray(turn.items)) {
         return [];
       }
-      const timestamp =
-        typeof turn.completedAt === "number"
-          ? turn.completedAt
-          : typeof turn.startedAt === "number"
-            ? turn.startedAt
-            : undefined;
+      const timestamp = timestampFrom(turn);
       return turn.items.flatMap((item) => messageFromItem(item, timestamp));
     });
+}
+
+export function turnsFromThreadHistory(thread: unknown): unknown[] {
+  if (Array.isArray(thread)) {
+    return thread;
+  }
+  if (!isRecord(thread)) {
+    return [];
+  }
+  if (Array.isArray(thread.turns)) {
+    return thread.turns;
+  }
+  if (isRecord(thread.thread) && Array.isArray(thread.thread.turns)) {
+    return thread.thread.turns;
+  }
+  if (Array.isArray(thread.data)) {
+    return thread.data;
+  }
+  return [];
+}
+
+export function messagesFromCodexEvent(message: unknown): ChatHistoryMessage[] {
+  if (!isRecord(message) || message.method !== "item/completed" || !isRecord(message.params)) {
+    return [];
+  }
+
+  return messageFromItem(message.params.item, timestampFrom(message.params) ?? timestampFrom(message.params.item));
 }
 
 function messageFromItem(item: unknown, timestamp: number | undefined): ChatHistoryMessage[] {
@@ -46,9 +67,10 @@ function messageFromItem(item: unknown, timestamp: number | undefined): ChatHist
   }
 
   if (item.type === "commandExecution" && typeof item.command === "string") {
-    const output = typeof item.aggregatedOutput === "string" && item.aggregatedOutput.trim()
-      ? `\n\n${item.aggregatedOutput}`
-      : "";
+    const output =
+      typeof item.aggregatedOutput === "string" && item.aggregatedOutput.trim()
+        ? `\n\n${item.aggregatedOutput}`
+        : "";
     return [{ id, role: "system", text: `命令\n${item.command}${output}`, timestamp }];
   }
 
@@ -91,14 +113,13 @@ function compareTurns(a: unknown, b: unknown) {
 }
 
 function turnTimestamp(turn: unknown) {
-  if (!isRecord(turn)) {
-    return 0;
+  return timestampFrom(turn) ?? 0;
+}
+
+function timestampFrom(value: unknown) {
+  if (!isRecord(value)) {
+    return undefined;
   }
-  if (typeof turn.startedAt === "number") {
-    return turn.startedAt;
-  }
-  if (typeof turn.completedAt === "number") {
-    return turn.completedAt;
-  }
-  return 0;
+  const timestamp = value.completedAt ?? value.startedAt ?? value.updatedAt ?? value.createdAt;
+  return typeof timestamp === "number" ? timestamp : undefined;
 }
