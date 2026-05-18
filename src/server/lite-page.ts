@@ -725,6 +725,7 @@ export const litePageHtml = String.raw`<!doctype html>
         var replySyncBaselineId = "";
         var replySyncBaselineText = "";
         var replySyncStartedAt = 0;
+        var pendingUserBubble = null;
         var workspaceOpenByKey = readWorkspaceOpenState();
 
         var pairingInput = document.getElementById("pairingCode");
@@ -1148,6 +1149,7 @@ export const litePageHtml = String.raw`<!doctype html>
           lastAssistantBubble = null;
           lastAssistantItemId = "";
           activeAssistantItemId = "";
+          pendingUserBubble = null;
         }
 
         function orderedItemsForTurn(turn) {
@@ -1232,7 +1234,7 @@ export const litePageHtml = String.raw`<!doctype html>
           replySyncAttempts = 0;
           cancelReplySync();
           resetActivities();
-          addBubble("user", prompt);
+          pendingUserBubble = { text: prompt, body: addBubble("user", prompt) };
           setWork("thinking", "Codex 正在思考", "请求已发出，正在等待 Codex 返回实时状态。");
           promptEl.value = "";
           autoSizePrompt();
@@ -1258,6 +1260,7 @@ export const litePageHtml = String.raw`<!doctype html>
         function afterSend(res) {
           sendBtn.disabled = false;
           if (!res || !res.ok) {
+            pendingUserBubble = null;
             show(actionMsg, (res && res.error) || "发送失败");
             addSystemBubble((res && res.error) || "发送失败");
             return;
@@ -1596,6 +1599,13 @@ export const litePageHtml = String.raw`<!doctype html>
           if (itemId && bubbleByItemId[itemId]) return;
           var text = userContentToText(item && item.content);
           if (!text) return;
+          if (pendingUserBubble && pendingUserBubble.text === text) {
+            if (itemId) {
+              bubbleByItemId[itemId] = pendingUserBubble.body;
+            }
+            pendingUserBubble = null;
+            return;
+          }
           addBubble("user", text, "你 · " + new Date().toLocaleTimeString(), itemId || undefined);
         }
 
@@ -1737,6 +1747,12 @@ export const litePageHtml = String.raw`<!doctype html>
           var candidates = [];
           collectAssistantMessages(value, candidates);
           if (!candidates.length) return null;
+          var finalAnswerCandidates = candidates.filter(function (candidate) {
+            return candidate.phase === "final_answer";
+          });
+          if (finalAnswerCandidates.length) {
+            candidates = finalAnswerCandidates;
+          }
           candidates.sort(function (a, b) {
             return (b.ts || 0) - (a.ts || 0);
           });
@@ -1763,7 +1779,8 @@ export const litePageHtml = String.raw`<!doctype html>
               out.push({
                 id: id,
                 text: value.text,
-                ts: toTimestampMs(ts)
+                ts: toTimestampMs(ts),
+                phase: value.phase === "commentary" || value.phase === "final_answer" ? value.phase : null
               });
             }
           }
