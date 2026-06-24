@@ -194,10 +194,17 @@ export class CodexAppServerClient {
 
       const ws = new WebSocket(this.options.url);
       let settled = false;
+      let initialized = false;
 
       const fail = (error: Error) => {
         if (!settled) {
           settled = true;
+          if (this.ws === ws) {
+            this.ws = undefined;
+          }
+          ws.removeAllListeners();
+          ws.close();
+          this.rejectAllPending(error);
           reject(error);
         }
       };
@@ -207,6 +214,9 @@ export class CodexAppServerClient {
         ws.on("message", (raw) => this.handleMessage(raw.toString()));
         ws.on("close", () => {
           if (this.stopped) {
+            return;
+          }
+          if (!initialized && settled) {
             return;
           }
           this.setStatus({ connected: false, lastError: "Codex app-server connection closed." });
@@ -221,7 +231,7 @@ export class CodexAppServerClient {
         });
 
         try {
-          const initialized = (await this.request("initialize", {
+          const initResult = (await this.request("initialize", {
             clientInfo: {
               name: "codexproxy-bridge",
               title: "Codex Proxy Bridge",
@@ -232,12 +242,13 @@ export class CodexAppServerClient {
 
           this.setStatus({
             connected: true,
-            userAgent: typeof initialized.userAgent === "string" ? initialized.userAgent : undefined,
-            codexHome: typeof initialized.codexHome === "string" ? initialized.codexHome : undefined,
+            userAgent: typeof initResult.userAgent === "string" ? initResult.userAgent : undefined,
+            codexHome: typeof initResult.codexHome === "string" ? initResult.codexHome : undefined,
             platformFamily:
-              typeof initialized.platformFamily === "string" ? initialized.platformFamily : undefined,
-            platformOs: typeof initialized.platformOs === "string" ? initialized.platformOs : undefined
+              typeof initResult.platformFamily === "string" ? initResult.platformFamily : undefined,
+            platformOs: typeof initResult.platformOs === "string" ? initResult.platformOs : undefined
           });
+          initialized = true;
           settled = true;
           resolve();
         } catch (error) {

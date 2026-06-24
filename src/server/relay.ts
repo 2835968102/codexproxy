@@ -7,8 +7,8 @@ import {
   HelloPayload,
   SessionSummary,
   createEnvelope,
-  envelopeSchema,
   helloSchema,
+  parseEnvelope,
   rpcRequestSchema
 } from "../shared/protocol.js";
 
@@ -56,7 +56,7 @@ export class RelayHub {
   }
 
   private async handleHello(ws: WebSocket, raw: string) {
-    const envelope = envelopeSchema.parse(JSON.parse(raw)) as Envelope;
+    const envelope = parseEnvelope(raw);
     if (envelope.v !== CLIENT_PROTOCOL_VERSION || envelope.type !== "hello") {
       throw new Error("Expected hello envelope.");
     }
@@ -177,7 +177,7 @@ export class RelayHub {
   }
 
   private async handlePeerMessage(peer: Peer, raw: string) {
-    const envelope = envelopeSchema.parse(JSON.parse(raw)) as Envelope;
+    const envelope = parseEnvelope(raw);
     const session = this.sessions.get(peer.sessionId);
     if (!session) {
       throw new Error("Session no longer exists.");
@@ -212,6 +212,10 @@ export class RelayHub {
       const next = this.sessions.get(sessionId);
       if (!next) {
         this.send(peer.ws, "error", { message: "Session not found." });
+        return;
+      }
+      if (!next.bridge || next.bridge.ws.readyState !== WebSocket.OPEN) {
+        this.send(peer.ws, "error", { message: "Session is not connected." });
         return;
       }
 

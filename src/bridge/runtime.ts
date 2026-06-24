@@ -3,7 +3,7 @@ import type { BridgeConfig } from "./config.js";
 import { CodexAppServerClient } from "./codex-client.js";
 import {
   createEnvelope,
-  envelopeSchema,
+  parseEnvelope,
   rpcRequestSchema,
   type CodexTargetStatus
 } from "../shared/protocol.js";
@@ -158,7 +158,7 @@ export class BridgeRuntime {
   }
 
   private async handleRelayMessage(raw: string) {
-    const envelope = envelopeSchema.parse(JSON.parse(raw));
+    const envelope = parseEnvelope(raw);
     if (envelope.type === "hello.accepted") {
       const payload = envelope.payload as { sessionId?: unknown };
       this.acceptedSessionId = typeof payload.sessionId === "string" ? payload.sessionId : undefined;

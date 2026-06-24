@@ -1,11 +1,18 @@
 import { describe, expect, it } from "vitest";
-import { createEnvelope, envelopeSchema, textInput } from "../src/shared/protocol.js";
+import { createEnvelope, envelopeSchema, parseEnvelope, textInput } from "../src/shared/protocol.js";
 import { messagesFromThreadHistory } from "../src/shared/thread-history.js";
 
 describe("shared protocol", () => {
   it("creates valid envelopes", () => {
     const envelope = createEnvelope("hello", { role: "controller", pairingCode: "123456" });
     expect(envelopeSchema.parse(envelope).type).toBe("hello");
+  });
+
+  it("rejects unsupported protocol versions", () => {
+    const envelope = createEnvelope("hello", { role: "controller", pairingCode: "123456" });
+    expect(() => parseEnvelope(JSON.stringify({ ...envelope, v: 999 }))).toThrow(
+      "Unsupported protocol version"
+    );
   });
 
   it("formats Codex text input in app-server shape", () => {

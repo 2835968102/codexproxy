@@ -112,6 +112,14 @@ export function createEnvelope<TType extends string, TPayload>(
   };
 }
 
+export function parseEnvelope(raw: string): Envelope {
+  const envelope = envelopeSchema.parse(JSON.parse(raw)) as Envelope;
+  if (envelope.v !== CLIENT_PROTOCOL_VERSION) {
+    throw new Error(`Unsupported protocol version: ${envelope.v}`);
+  }
+  return envelope;
+}
+
 export function textInput(text: string) {
   return {
     type: "text",
