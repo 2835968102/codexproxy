@@ -1,4 +1,4 @@
-import React, { FormEvent, KeyboardEvent, useEffect, useMemo, useRef, useState } from "react";
+﻿import React, { FormEvent, KeyboardEvent, useEffect, useMemo, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import {
   Envelope,
@@ -17,6 +17,9 @@ import "./styles.css";
 
 installMobileViewportVars();
 
+// Lightweight UI state types used by this single-page controller.
+// The page talks to the relay over WebSocket, renders thread history as chat,
+// and shows Codex runtime/tool progress as activity cards.
 type LogItem = {
   id: string;
   ts: number;
@@ -79,10 +82,12 @@ type WorkspaceGroup = {
 const requestTimeoutMs = 120000;
 const idleWorkStatus: WorkStatus = {
   phase: "idle",
-  label: "空闲",
-  detail: "发送消息后会显示 Codex 的实时状态。"
+  label: "Idle",
+  detail: "Codex status appears here after you send a message."
 };
 
+// Mobile browser chrome changes the visible viewport while typing.
+// This CSS variable keeps the composer above the keyboard/bottom bar.
 function installMobileViewportVars() {
   const update = () => {
     const viewport = window.visualViewport;
@@ -96,15 +101,23 @@ function installMobileViewportVars() {
 }
 
 function App() {
+  // Connection/session state. The browser is a "controller" peer connected
+  // to the relay, while bridge sessions represent machines running Codex.
   const [pairingCode, setPairingCode] = useState(localStorage.getItem("pairingCode") ?? "");
   const [selectedSession, setSelectedSession] = useState(localStorage.getItem("sessionId") ?? "");
   const [connected, setConnected] = useState(false);
   const [sessions, setSessions] = useState<SessionSummary[]>([]);
   const [activeSession, setActiveSession] = useState<SessionSummary | undefined>();
+
+  // Chat and activity state. Replies are user/assistant bubbles; activities are
+  // status/tool/file-change summaries derived from Codex protocol events.
   const [logs, setLogs] = useState<LogItem[]>([]);
   const [replies, setReplies] = useState<ReplyItem[]>([]);
   const [activities, setActivities] = useState<ActivityItem[]>([]);
   const [workStatus, setWorkStatus] = useState<WorkStatus>(idleWorkStatus);
+
+  // Thread/workspace state. Threads are grouped by working directory so the UI
+  // can behave like a small project drawer on both desktop and mobile.
   const [threads, setThreads] = useState<ThreadSummary[]>([]);
   const [currentThreadId, setCurrentThreadId] = useState("");
   const [prompt, setPrompt] = useState("");
@@ -112,13 +125,18 @@ function App() {
   const [workspaceOpenByKey, setWorkspaceOpenByKey] = useState<Record<string, boolean>>(() =>
     readWorkspaceOpenState()
   );
+  const [workspaceSearch, setWorkspaceSearch] = useState("");
   const [busy, setBusy] = useState(false);
   const [connecting, setConnecting] = useState(false);
   const [connectionMessage, setConnectionMessage] = useState("");
   const [threadListLoading, setThreadListLoading] = useState(false);
   const [threadLoading, setThreadLoading] = useState(false);
   const [showChatBottomButton, setShowChatBottomButton] = useState(false);
+  const [searchClearPulsing, setSearchClearPulsing] = useState(false);
+  const [searchEmptyActionsExpanded, setSearchEmptyActionsExpanded] = useState(false);
 
+  // Refs hold imperative objects that should not cause re-renders: WebSocket,
+  // outstanding RPC promises, current thread metadata, and scroll/prompt nodes.
   const socketRef = useRef<WebSocket | undefined>(undefined);
   const pendingRef = useRef(new Map<string, Pending>());
   const currentTurnByThread = useRef(new Map<string, string>());
@@ -126,8 +144,64 @@ function App() {
   const chatListRef = useRef<HTMLDivElement | null>(null);
   const chatPinnedRef = useRef(true);
   const promptRef = useRef<HTMLTextAreaElement | null>(null);
+  const workspaceSearchInputRef = useRef<HTMLInputElement | null>(null);
+  const searchClearPulseTimerRef = useRef<number | undefined>(undefined);
   const activeReplyIdRef = useRef<string | undefined>(undefined);
   const retryingWithoutSessionRef = useRef(false);
+
+  // Workspace search helpers keep the drawer usable on narrow screens:
+  // clear/narrow/open-all are small UX actions around the same search query.
+  function triggerSearchClearPulse() {
+    if (searchClearPulseTimerRef.current) {
+      window.clearTimeout(searchClearPulseTimerRef.current);
+    }
+    setSearchClearPulsing(true);
+    searchClearPulseTimerRef.current = window.setTimeout(() => {
+      setSearchClearPulsing(false);
+      searchClearPulseTimerRef.current = undefined;
+    }, 280);
+  }
+
+  function clearWorkspaceSearch() {
+    setWorkspaceSearch("");
+    workspaceSearchInputRef.current?.focus();
+    triggerSearchClearPulse();
+  }
+
+  function focusWorkspaceSearchInput() {
+    workspaceSearchInputRef.current?.focus();
+  }
+
+  function resetWorkspaceSearchAll() {
+    clearWorkspaceSearch();
+  }
+
+  function narrowWorkspaceSearch() {
+    const parts = workspaceSearch.trim().split(/\s+/).filter(Boolean);
+    if (parts.length <= 1) {
+      clearWorkspaceSearch();
+      return;
+    }
+    setWorkspaceSearch(parts.slice(0, -1).join(" "));
+    workspaceSearchInputRef.current?.focus();
+    triggerSearchClearPulse();
+  }
+
+  function restoreWorkspaceSearchAndOpenAll() {
+    clearWorkspaceSearch();
+    setAllWorkspaceGroupsOpen(true);
+  }
+
+  function setAllWorkspaceGroupsOpen(nextOpen: boolean) {
+    setWorkspaceOpenByKey((current) => {
+      const next = { ...current };
+      for (const group of workspaceGroups) {
+        next[group.key] = nextOpen;
+      }
+      saveWorkspaceOpenState(next);
+      return next;
+    });
+  }
 
   useEffect(() => {
     currentThreadIdRef.current = currentThreadId;
@@ -155,15 +229,150 @@ function App() {
     resizePrompt();
   }, [prompt]);
 
+  useEffect(() => {
+    const onWorkspaceSearchShortcut = (event: globalThis.KeyboardEvent) => {
+      if (!connected || event.key !== "/" || event.metaKey || event.ctrlKey || event.altKey) {
+        return;
+      }
+      const target = event.target as Element | null;
+      if (!target || !(target instanceof Element)) {
+        return;
+      }
+      const tag = target.tagName.toLowerCase();
+      if (
+        (target instanceof HTMLElement && target.isContentEditable) ||
+        tag === "input" ||
+        tag === "textarea" ||
+        tag === "select" ||
+        tag === "button"
+      ) {
+        return;
+      }
+      if (event.key === "/" && document.activeElement !== workspaceSearchInputRef.current) {
+        event.preventDefault();
+        workspaceSearchInputRef.current?.focus();
+      }
+    };
+
+    document.addEventListener("keydown", onWorkspaceSearchShortcut);
+    return () => {
+      document.removeEventListener("keydown", onWorkspaceSearchShortcut);
+      if (searchClearPulseTimerRef.current) {
+        window.clearTimeout(searchClearPulseTimerRef.current);
+      }
+    };
+  }, [connected]);
+
   const activeThread = useMemo(
     () => threads.find((thread) => thread.id === currentThreadId),
     [threads, currentThreadId]
   );
+  const isMobileWorkspaceTitle = typeof window !== "undefined" && window.matchMedia("(max-width: 820px)").matches;
   const workspaceGroups = useMemo(() => groupThreadsByCwd(threads), [threads]);
-  const currentTitle = currentThreadId ? threadTitle(activeThread) : "新线程";
+  const workspaceSearchQuery = workspaceSearch.trim();
+  const workspaceSearchTerms = useMemo(() => workspaceSearchQuery.split(/\s+/).filter(Boolean), [workspaceSearchQuery]);
+  const visibleWorkspaceGroups = useMemo(
+    () => filterWorkspaceGroups(workspaceGroups, workspaceSearchQuery),
+    [workspaceGroups, workspaceSearchQuery]
+  );
+  const visibleThreadCount = useMemo(
+    () => visibleWorkspaceGroups.reduce((total, group) => total + group.threads.length, 0),
+    [visibleWorkspaceGroups]
+  );
+  const hasWorkspaceSearch = workspaceSearchTerms.length > 0;
+  const workspaceSearchHasMultipleTerms = workspaceSearchTerms.length > 1;
+  const isWorkspaceSearchEmptyState = hasWorkspaceSearch && visibleWorkspaceGroups.length === 0;
+  const isWorkspaceSearchEmptyActionsCompact = isMobileWorkspaceTitle && isWorkspaceSearchEmptyState;
+  const isWorkspaceSearchEmptyActionsCollapsed = isWorkspaceSearchEmptyActionsCompact && !searchEmptyActionsExpanded;
+  const emptySearchActionId = "workspace-search-empty-extra-actions";
+  const emptySearchActionTabIndex = isWorkspaceSearchEmptyActionsCollapsed ? -1 : 0;
+  const searchEmptyMoreLabel = isWorkspaceSearchEmptyActionsCollapsed ? "展开更多搜索操作" : "收起更多搜索操作";
+  const searchEmptyActionsLabel = "会话搜索更多操作";
+  const searchEmptyLabels = {
+    noDataMessage: "当前暂无会话，先创建一条吧。",
+    noDataHint: "点击上方“新会话”开始第一条对话。",
+    open: "返回并显示全部会话列表",
+    clear: "返回全部会话",
+    clearSrLabel: "清空搜索条件并返回全部会话",
+    clearTitle: "清空搜索条件并返回全部会话",
+    continueSearchAction: "继续搜索",
+    continueSearchSrLabel: "返回搜索框继续修改关键词",
+    continueSearchHint: "改一个关键词，回车即可重试。",
+    narrowMultiple: {
+      action: "删一词",
+      srLabel: "删除最后一个关键词并缩短搜索条件",
+      title: "删除最后一个关键词并缩短搜索条件"
+    },
+    narrowSingle: {
+      action: "改词重搜",
+      srLabel: "清空关键词并改词重搜",
+      title: "清空关键词并改词重搜"
+    },
+    restore: {
+      action: "恢复全部",
+      srLabel: "清空搜索并展开所有会话分组",
+      title: "清空搜索并展开所有会话分组"
+    },
+    emptySearchMessage: hasWorkspaceSearch ? "未找到匹配会话。" : "未找到会话。"
+  };
+  const narrowWorkspaceSearchLabel = workspaceSearchHasMultipleTerms ? searchEmptyLabels.narrowMultiple : searchEmptyLabels.narrowSingle;
+  const workspaceSearchEmptyMessage = searchEmptyLabels.emptySearchMessage;
+  const allWorkspaceGroupsOpen = workspaceGroups.every((group) => workspaceOpenByKey[group.key] !== false);
+  const workspaceSummaryHint = useMemo(() => {
+    if (!hasWorkspaceSearch) {
+      return "";
+    }
+    return "搜索中会按命中项展开显示，清空搜索后可继续使用“展开/收起全部”。";
+  }, [hasWorkspaceSearch]);
+  const workspaceSummaryStats = useMemo(
+    () => {
+      if (!workspaceGroups.length) {
+        return {
+          summary: isMobileWorkspaceTitle ? "暂无会话" : "暂无会话",
+          pills: []
+        };
+      }
+
+      if (hasWorkspaceSearch) {
+        return {
+          summary: isMobileWorkspaceTitle
+            ? `${visibleWorkspaceGroups.length}组 · ${visibleThreadCount}命中`
+            : `会话分组：${visibleWorkspaceGroups.length}组 · ${visibleThreadCount}条命中`,
+          pills: [
+            { label: `组 ${visibleWorkspaceGroups.length}`, type: "neutral" as const },
+            { label: `命中 ${visibleThreadCount}`, type: "accent" as const }
+          ]
+        };
+      }
+
+      return {
+        summary: isMobileWorkspaceTitle
+          ? `${workspaceGroups.length}组 · ${threads.length}会话`
+          : `会话分组：${workspaceGroups.length}组 · ${threads.length}个会话`,
+        pills: [
+          { label: `组 ${workspaceGroups.length}`, type: "neutral" as const },
+          { label: `会话 ${threads.length}`, type: "accent" as const }
+        ]
+      };
+    },
+    [
+      isMobileWorkspaceTitle,
+      hasWorkspaceSearch,
+      threads.length,
+      visibleThreadCount,
+      visibleWorkspaceGroups.length,
+      workspaceGroups.length
+    ]
+  );
+  const workspaceSummaryText = workspaceSummaryStats.summary;
+
+  useEffect(() => {
+    setSearchEmptyActionsExpanded(false);
+  }, [workspaceSearchQuery, workspaceGroups.length, hasWorkspaceSearch]);
+  const currentTitle = currentThreadId ? threadTitle(activeThread) : "New thread";
   const currentSubtitle = currentThreadId
-    ? normalizeCwd(activeThread?.cwd) || "未设置工作目录"
-    : cwd.trim() || "选择项目或输入工作目录后发送第一条消息";
+    ? normalizeCwd(activeThread?.cwd) || "No working directory set"
+    : cwd.trim() || "Choose a project or enter a working directory before sending your first message";
 
   function addLog(kind: string, body: unknown) {
     setLogs((items) =>
@@ -272,6 +481,8 @@ function App() {
     }));
   }
 
+  // Replace the current chat transcript with persisted thread history returned
+  // by Codex. Used when selecting an existing thread or reconnecting.
   function replaceRepliesFromHistory(thread: unknown) {
     const messages = messagesFromThreadHistory(thread);
     pinChatToBottom();
@@ -288,12 +499,14 @@ function App() {
     );
   }
 
+  // Open the controller WebSocket to the relay. After the socket opens we send
+  // a protocol "hello" with the pairing code and optional target session ID.
   function connect(event?: FormEvent) {
     event?.preventDefault();
     const cleanPairingCode = pairingCode.trim();
     const cleanSessionId = selectedSession.trim();
     setConnecting(true);
-    setConnectionMessage("正在连接...");
+    setConnectionMessage("Connecting...");
     localStorage.setItem("pairingCode", cleanPairingCode);
     if (cleanSessionId) {
       localStorage.setItem("sessionId", cleanSessionId);
@@ -325,17 +538,19 @@ function App() {
     ws.onclose = () => {
       setConnected(false);
       setConnecting(false);
-      setConnectionMessage("连接已断开。请确认配对码、地址和 bridge 状态。");
-      addLog("system", "连接已断开");
+      setConnectionMessage("Connection closed. Check the pairing code, address, and bridge status.");
+      addLog("system", "Connection closed");
     };
 
     ws.onerror = () => {
       setConnecting(false);
-      setConnectionMessage("WebSocket 连接错误。请确认手机能访问这个地址，或检查防火墙。");
-      addLog("error", "WebSocket 连接错误");
+      setConnectionMessage("WebSocket connection error. Check the address, firewall, and bridge status.");
+      addLog("error", "WebSocket connection error");
     };
   }
 
+  // Top-level relay envelope dispatcher. It handles controller handshakes,
+  // relay errors, session updates, RPC responses, and streamed Codex events.
   function handleEnvelope(envelope: Envelope) {
     if (envelope.type === "hello.accepted") {
       setConnected(true);
@@ -346,19 +561,19 @@ function App() {
       setSessions(payload.sessions ?? [payload.summary]);
       setSelectedSession(payload.sessionId);
       localStorage.setItem("sessionId", payload.sessionId);
-      addLog("system", "已连接服务器");
+      addLog("system", "Connected to server");
       void refreshThreads(undefined, { loadHistory: true });
       return;
     }
 
     if (envelope.type === "error") {
       const payload = envelope.payload as any;
-      const message = payload?.message ?? "连接失败";
+      const message = payload?.message ?? "Connection failed";
       if (message === "Requested session is not connected." && !retryingWithoutSessionRef.current) {
         retryingWithoutSessionRef.current = true;
         setSelectedSession("");
         localStorage.removeItem("sessionId");
-        setConnectionMessage("旧 Session ID 已失效，正在自动改为留空重连...");
+        setConnectionMessage("Old Session ID is invalid. Reconnecting without a session ID...");
         const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
         socketRef.current?.close();
         const ws = new WebSocket(`${protocol}//${window.location.host}/ws`);
@@ -378,11 +593,11 @@ function App() {
         ws.onclose = () => {
           setConnected(false);
           setConnecting(false);
-          setConnectionMessage("连接已断开。请确认配对码、地址和 bridge 状态。");
+          setConnectionMessage("Connection closed. Check the pairing code, address, and bridge status.");
         };
         ws.onerror = () => {
           setConnecting(false);
-          setConnectionMessage("WebSocket 连接错误。请确认手机能访问这个地址，或检查防火墙。");
+          setConnectionMessage("WebSocket connection error. Check the address, firewall, and bridge status.");
         };
         return;
       }
@@ -425,6 +640,8 @@ function App() {
     addLog(envelope.type, envelope.payload);
   }
 
+  // Track which Codex turn is active per thread, so follow-up prompts continue
+  // the correct in-progress turn when possible.
   function updateTurnTracking(message: unknown) {
     const msg = message as any;
     if (msg?.method === "thread/started" && msg.params?.thread?.id && !currentThreadIdRef.current) {
@@ -441,6 +658,8 @@ function App() {
     }
   }
 
+  // Convert Codex message events into chat bubbles. Delta events are appended
+  // to the current assistant bubble to preserve streaming behavior.
   function updateReplies(message: unknown) {
     const msg = message as any;
     const selectedThreadId = currentThreadIdRef.current;
@@ -479,6 +698,8 @@ function App() {
     }
   }
 
+  // Convert Codex protocol notifications into compact status/activity cards:
+  // planning, command output, file changes, approvals, warnings, and errors.
   function updateWorkActivity(message: unknown) {
     const msg = message as any;
     if (!msg || typeof msg.method !== "string") {
@@ -501,20 +722,20 @@ function App() {
       case "thread/started":
         upsertActivity({
           id: `thread:${params.thread?.id ?? Date.now()}`,
-          kind: "状态",
-          title: "已创建对话",
-          detail: params.thread?.cwd ? `工作目录：${params.thread.cwd}` : undefined,
+          kind: "Status",
+          title: "Thread created",
+          detail: params.thread?.cwd ? `Working directory: ${params.thread.cwd}` : undefined,
           state: "done"
         });
         return;
       case "turn/started": {
         const turnId = params.turn?.id ?? params.turnId ?? "active";
-        setWork("thinking", "正在思考", "Codex 已开始处理这条消息。");
+        setWork("thinking", "Thinking", "Codex started processing this message.");
         upsertActivity({
           id: `turn:${turnId}`,
-          kind: "状态",
-          title: "开始处理请求",
-          detail: "正在分析上下文、规划下一步。",
+          kind: "Status",
+          title: "Request started",
+          detail: "Codex is analyzing context and planning the next step.",
           state: "running"
         });
         return;
@@ -522,11 +743,11 @@ function App() {
       case "turn/plan/updated": {
         const detail = formatPlanUpdate(params);
         const running = Array.isArray(params.plan) && params.plan.some((step: any) => step?.status === "inProgress");
-        setWork("thinking", "计划已更新", currentPlanStep(params.plan) ?? "Codex 正在规划下一步。");
+        setWork("thinking", "Plan updated", currentPlanStep(params.plan) ?? "Codex is planning the next step.");
         upsertActivity({
           id: `plan:${params.turnId ?? "active"}`,
-          kind: "计划",
-          title: "计划已更新",
+          kind: "Plan",
+          title: "Plan updated",
           detail,
           state: running ? "running" : "done"
         });
@@ -550,53 +771,53 @@ function App() {
       }
       case "item/agentMessage/delta": {
         const id = params.itemId || params.turnId || "active";
-        setWork("replying", "正在回复", "Codex 正在输出回答。");
+        setWork("replying", "Replying", "Codex is streaming the answer.");
         upsertActivity({
           id: `reply:${id}`,
-          kind: "回复",
-          title: "正在生成回复",
-          detail: "回答内容正在流式返回。",
+          kind: "Reply",
+          title: "Generating reply",
+          detail: "Answer content is streaming back.",
           state: "running"
         });
         return;
       }
       case "item/plan/delta": {
         const id = params.itemId || `plan:${params.turnId ?? "active"}`;
-        setWork("thinking", "正在更新计划", "Codex 正在整理执行步骤。");
+        setWork("thinking", "Updating plan", "Codex is organizing execution steps.");
         appendActivityDetail(
           id,
-          { kind: "计划", title: "正在更新计划", state: "running" },
+          { kind: "Plan", title: "Updating plan", state: "running" },
           String(params.delta ?? "")
         );
         return;
       }
       case "item/commandExecution/outputDelta": {
         const id = params.itemId || `command:${params.turnId ?? "active"}`;
-        setWork("tool", "命令正在输出", "Codex 调用的命令正在返回结果。");
+        setWork("tool", "Command running", "Codex is running a command and streaming output.");
         appendActivityDetail(
           id,
-          { kind: "工具", title: "命令正在输出", state: "running" },
+          { kind: "Tool", title: "Command running", state: "running" },
           String(params.delta ?? "")
         );
         return;
       }
       case "item/fileChange/outputDelta": {
         const id = params.itemId || `file:${params.turnId ?? "active"}`;
-        setWork("tool", "文件修改中", "Codex 正在应用文件变更。");
+        setWork("tool", "File change running", "Codex is editing files.");
         appendActivityDetail(
           id,
-          { kind: "文件", title: "文件修改输出", state: "running" },
+          { kind: "File", title: "File change running", state: "running" },
           String(params.delta ?? "")
         );
         return;
       }
       case "item/fileChange/patchUpdated": {
         const id = params.itemId || `file:${params.turnId ?? "active"}`;
-        setWork("tool", "文件改动已更新", "Codex 正在准备或应用补丁。");
+        setWork("tool", "Patch updated", "Codex updated a file patch.");
         upsertActivity({
           id,
-          kind: "文件",
-          title: "文件改动已更新",
+          kind: "File",
+          title: "Patch updated",
           detail: formatFileChanges(params.changes),
           state: "running"
         });
@@ -604,11 +825,11 @@ function App() {
       }
       case "item/mcpToolCall/progress": {
         const id = params.itemId || `mcp:${params.turnId ?? "active"}`;
-        setWork("tool", "MCP 工具运行中", String(params.message ?? "工具正在返回进度。"));
+        setWork("tool", "MCP tool running", String(params.message ?? "Tool progress updated."));
         upsertActivity({
           id,
           kind: "MCP",
-          title: "MCP 工具运行中",
+          title: "MCP tool running",
           detail: String(params.message ?? ""),
           state: "running"
         });
@@ -618,42 +839,42 @@ function App() {
       case "item/reasoning/summaryTextDelta":
       case "item/reasoning/textDelta": {
         const id = params.itemId || `reasoning:${params.turnId ?? "active"}`;
-        setWork("thinking", "正在思考", "Codex 正在分析上下文。");
+        setWork("thinking", "Thinking", "Codex is reasoning about the task.");
         upsertActivity({
           id,
-          kind: "思考",
-          title: "正在思考",
-          detail: "收到推理进度更新。",
+          kind: "Reasoning",
+          title: "Thinking",
+          detail: "Codex is analyzing the current request.",
           state: "running"
         });
         return;
       }
       case "hook/started":
-        setWork("tool", "Hook 运行中", formatHookRun(params.run));
+        setWork("tool", "Hook running", formatHookRun(params.run));
         upsertActivity({
           id: `hook:${params.run?.id ?? Date.now()}`,
           kind: "Hook",
-          title: "Hook 运行中",
+          title: "Hook running",
           detail: formatHookRun(params.run),
           state: "running"
         });
         return;
       case "hook/completed":
-        setWork(params.run?.status === "failed" ? "error" : "tool", "Hook 已完成", formatHookRun(params.run));
+        setWork(params.run?.status === "failed" ? "error" : "tool", "Hook completed", formatHookRun(params.run));
         upsertActivity({
           id: `hook:${params.run?.id ?? Date.now()}`,
           kind: "Hook",
-          title: params.run?.status === "failed" ? "Hook 失败" : "Hook 已完成",
+          title: params.run?.status === "failed" ? "Hook failed" : "Hook completed",
           detail: formatHookRun(params.run),
           state: params.run?.status === "failed" ? "error" : "done"
         });
         return;
       case "serverRequest/resolved":
-        setWork("thinking", "审批已处理", "Codex 继续执行当前任务。");
+        setWork("thinking", "Request resolved", "Codex resumed after the request was resolved.");
         upsertActivity({
           id: `request:${params.requestId ?? Date.now()}`,
-          kind: "审批",
-          title: "审批已处理",
+          kind: "Request",
+          title: "Request resolved",
           state: "done"
         });
         return;
@@ -662,17 +883,17 @@ function App() {
         const state = params.turn?.status === "failed" ? "error" : "done";
         const title =
           params.turn?.status === "interrupted"
-            ? "已打断"
+            ? "Turn interrupted"
             : params.turn?.status === "failed"
-              ? "处理失败"
-              : "处理完成";
+              ? "Turn failed"
+              : "Turn completed";
         const detail =
           params.turn?.error?.message ??
-          (params.turn?.status === "interrupted" ? "这次回复已被打断。" : "Codex 已完成这次回复。");
+          (params.turn?.status === "interrupted" ? "The turn was interrupted." : "Codex finished this turn.");
         setWork(state === "error" ? "error" : "complete", title, detail);
         upsertActivity({
           id: `turn:${turnId}`,
-          kind: "状态",
+          kind: "Status",
           title,
           detail,
           state
@@ -680,12 +901,12 @@ function App() {
         return;
       }
       case "error":
-        setWork("error", "Codex 返回错误", String(params.message ?? "未知错误"));
+        setWork("error", "Codex error", String(params.message ?? "Unknown error"));
         upsertActivity({
           id: `error:${Date.now()}`,
-          kind: "错误",
-          title: "Codex 返回错误",
-          detail: String(params.message ?? "未知错误"),
+          kind: "Error",
+          title: "Codex error",
+          detail: String(params.message ?? "Unknown error"),
           state: "error"
         });
         return;
@@ -694,9 +915,9 @@ function App() {
       case "configWarning":
         upsertActivity({
           id: `${msg.method}:${Date.now()}`,
-          kind: "警告",
-          title: "Codex 警告",
-          detail: String(params.message ?? params.warning ?? "收到警告。"),
+          kind: "Warning",
+          title: "Codex warning",
+          detail: String(params.message ?? params.warning ?? "Warning"),
           state: "error"
         });
         return;
@@ -716,7 +937,7 @@ function App() {
     setWork("waiting", request.title, request.detail);
     upsertActivity({
       id,
-      kind: "审批",
+      kind: "Request",
       title: request.title,
       detail: request.detail,
       state: "waiting"
@@ -726,7 +947,7 @@ function App() {
   function rpc(method: string, params?: unknown): Promise<RpcResponsePayload> {
     const ws = socketRef.current;
     if (!ws || ws.readyState !== WebSocket.OPEN) {
-      throw new Error("尚未连接");
+      throw new Error("Not connected to relay.");
     }
 
     const requestId = crypto.randomUUID();
@@ -747,7 +968,7 @@ function App() {
     return new Promise((resolve, reject) => {
       const timeout = window.setTimeout(() => {
         pendingRef.current.delete(requestId);
-        reject(new Error("请求超时"));
+        reject(new Error("Codex request timed out."));
       }, requestTimeoutMs);
 
       pendingRef.current.set(requestId, {
@@ -816,7 +1037,7 @@ function App() {
   async function loadThreadHistory(threadId: string) {
     pinChatToBottom();
     setThreadLoading(true);
-    setWork("thinking", "正在加载历史记录", "正在读取这个对话的消息和活动状态。");
+    setWork("thinking", "Loading thread history", "Loading previous turns for this thread.");
     try {
       const response = await rpc("thread.read", { threadId, includeTurns: true });
       if (!response.ok) {
@@ -832,10 +1053,10 @@ function App() {
       }
       replaceRepliesFromHistory(response.result);
       scrollChatToBottomAfterLayout("auto");
-      setWork("complete", "历史记录已加载", "已切换到选中的对话。");
+      setWork("complete", "History loaded", "Thread history loaded successfully.");
     } catch (error) {
       addLog("error", error instanceof Error ? error.message : error);
-      setWork("error", "历史加载失败", error instanceof Error ? error.message : String(error));
+      setWork("error", "Failed to load history", error instanceof Error ? error.message : String(error));
     } finally {
       setThreadLoading(false);
     }
@@ -853,9 +1074,9 @@ function App() {
     setPrompt("");
     activeReplyIdRef.current = undefined;
     setActivities([]);
-    setWork("thinking", "等待 Codex 开始处理", "请求已发出，正在等待 Codex 事件流。");
+    setWork("thinking", "Sending to Codex", "Sending your prompt to Codex.");
     setReplies((items) => {
-      const next: ReplyItem = { id: userReplyId, ts: Date.now(), kind: "你", role: "user", body: submittedPrompt };
+      const next: ReplyItem = { id: userReplyId, ts: Date.now(), kind: "User", role: "user", body: submittedPrompt };
       return [...items, next].slice(-80);
     });
     try {
@@ -893,11 +1114,11 @@ function App() {
       await refreshThreads(sentThreadId);
     } catch (error) {
       addLog("error", error instanceof Error ? error.message : error);
-      setWork("error", "发送失败", error instanceof Error ? error.message : String(error));
+      setWork("error", "Send failed", error instanceof Error ? error.message : String(error));
       upsertActivity({
         id: `send-error:${Date.now()}`,
-        kind: "错误",
-        title: "发送失败",
+        kind: "Error",
+        title: "Send failed",
         detail: error instanceof Error ? error.message : String(error),
         state: "error"
       });
@@ -949,6 +1170,15 @@ function App() {
     void loadThreadHistory(thread.id);
   }
 
+  function restoreRecentThreadFromEmptyState() {
+    if (threadListLoading || !threads[0]) {
+      return;
+    }
+    setSearchEmptyActionsExpanded(false);
+    clearWorkspaceSearch();
+    selectThread(threads[0]);
+  }
+
   function startThreadInWorkspace(nextCwd: string) {
     pinChatToBottom();
     setThreadLoading(false);
@@ -970,7 +1200,7 @@ function App() {
   async function interruptTurn() {
     const turnId = currentTurnByThread.current.get(currentThreadId);
     if (!currentThreadId || !turnId) {
-      addLog("system", "当前线程没有正在运行的 turn");
+      addLog("system", "No active turn is available.");
       return;
     }
 
@@ -989,7 +1219,7 @@ function App() {
       return body?.id !== undefined && typeof body?.method === "string" && body.method.includes("request");
     });
     if (!request) {
-      addLog("system", "没有找到待审批请求");
+      addLog("system", "No pending approval request found.");
       return;
     }
 
@@ -1017,15 +1247,15 @@ function App() {
       <section className="topbar">
         <div>
           <h1>Codex Proxy</h1>
-          <p>{connected ? "手机控制台已连接" : "输入配对码连接服务器上的 Codex bridge"}</p>
+          <p>{connected ? "Connected to the relay and ready to use Codex." : "Connect to a Codex bridge to start."}</p>
         </div>
-        <span className={connected ? "status online" : "status"}>{connected ? "在线" : "离线"}</span>
+        <span className={connected ? "status online" : "status"}>{connected ? "Online" : "Offline"}</span>
       </section>
 
       {!connected ? (
         <form className="panel login" onSubmit={connect}>
           <label>
-            配对码
+            Pairing code
             <input
               value={pairingCode}
               onChange={(event) => setPairingCode(event.target.value)}
@@ -1038,12 +1268,12 @@ function App() {
             <input
               value={selectedSession}
               onChange={(event) => setSelectedSession(event.target.value)}
-              placeholder="可选，只有多台 bridge 时需要"
+              placeholder="Optional. Leave empty to use the first available bridge."
             />
           </label>
           {connectionMessage && <p className="login-message">{connectionMessage}</p>}
           <button type="submit" disabled={connecting || !pairingCode.trim()}>
-            {connecting ? "连接中" : "连接"}
+            {connecting ? "Connecting..." : "Connect"}
           </button>
         </form>
       ) : (
@@ -1054,81 +1284,313 @@ function App() {
               <span>{activeSession?.sessionId}</span>
             </div>
             <div className="device-meta">
-              <span>{activeSession?.bridgeOnline ? "bridge 在线" : "bridge 离线"}</span>
-              <span>{activeSession?.codex?.connected ? "Codex 已连接" : "Codex 未连接"}</span>
+              <span>{activeSession?.bridgeOnline ? "bridge online" : "bridge offline"}</span>
+              <span>{activeSession?.codex?.connected ? "Codex connected" : "Codex disconnected"}</span>
             </div>
           </section>
 
-          <section className="grid">
+            <section className="grid">
             <aside className="sidebar">
               <div className="sidebar-head">
-                <div>
-                  <h2>项目</h2>
-                  <p>{workspaceGroups.length ? `${workspaceGroups.length} 个文件夹 · ${threads.length} 个对话` : "暂无项目"}</p>
+                <div className="workspace-summary-row">
+                  <div className="workspace-header-line">
+                    <h2>{isMobileWorkspaceTitle ? "会话" : "会话列表"}</h2>
+                    <button type="button" className="secondary-button" onClick={() => refreshThreads()}>
+                      {threadListLoading ? "刷新中" : "刷新"}
+                    </button>
+                  </div>
+                  <div className="workspace-summary-line">
+                    <p className="workspace-summary" role="status" aria-live="polite">
+                      {workspaceSummaryText}
+                    </p>
+                    {workspaceSummaryStats.pills.length > 0 && (
+                      <div className="workspace-summary-badges">
+                        {workspaceGroups.length > 0 && !hasWorkspaceSearch && (
+                          <button
+                            type="button"
+                            aria-pressed={allWorkspaceGroupsOpen}
+                            className="workspace-toggle-all"
+                            onClick={() => setAllWorkspaceGroupsOpen(!allWorkspaceGroupsOpen)}
+                          >
+                            {allWorkspaceGroupsOpen ? "收起全部" : "展开全部"}
+                          </button>
+                        )}
+                      </div>
+                    )}
+                  </div>
                 </div>
-                <button type="button" className="secondary-button" onClick={() => refreshThreads()}>
-                  {threadListLoading ? "刷新中" : "刷新"}
-                </button>
               </div>
               <button type="button" className="new-thread" onClick={startNewThread}>
-                新线程
+                新会话
               </button>
-              <div className="workspace-list">
-                {workspaceGroups.length === 0 ? (
-                  <div className="empty-state">
-                    还没有历史对话。输入工作目录并发送消息后，这里会按项目自动归档。
-                  </div>
-                ) : (
-                  workspaceGroups.map((group) => {
-                    const isOpen =
-                      group.threads.some((thread) => thread.id === currentThreadId) ||
-                      workspaceOpenByKey[group.key] !== false;
-                    return (
-                      <section className="workspace-group" key={group.key}>
+              <label aria-disabled={threadListLoading} aria-busy={threadListLoading ? "true" : undefined} className="workspace-search">
+                <div className="workspace-search-top">
+                  <span>搜索会话</span>
+                  <span className="workspace-search-count" aria-live="polite">
+                    {hasWorkspaceSearch ? `${visibleWorkspaceGroups.length}/${visibleThreadCount} 匹配` : ""}
+                  </span>
+                </div>
+                <div className="workspace-search-control">
+                  <input
+                    ref={workspaceSearchInputRef}
+                    type="search"
+                    aria-label="搜索会话"
+                    value={workspaceSearch}
+                    inputMode="search"
+                    onChange={(event) => setWorkspaceSearch(event.target.value)}
+                    onKeyDown={(event) => {
+                      if (event.key === "Escape") {
+                        event.preventDefault();
+                        clearWorkspaceSearch();
+                      }
+                    }}
+                    autoCapitalize="off"
+                    autoComplete="off"
+                    disabled={threadListLoading}
+                    enterKeyHint="search"
+                    spellCheck={false}
+                    placeholder="标题/内容/项目"
+                  />
+                    {workspaceSearch && (
+                      <button
+                        type="button"
+                        aria-label="清空搜索"
+                        className={`workspace-search-clear${searchClearPulsing ? " is-cleared" : ""}`}
+                        disabled={threadListLoading}
+                        title="清空搜索"
+                        onClick={clearWorkspaceSearch}
+                      >
+                        <span aria-hidden="true">×</span>
+                        <span className="sr-only">清空搜索</span>
+                      </button>
+                  )}
+                </div>
+              </label>
+              <div className={threadListLoading ? "workspace-list loading" : "workspace-list"}>
+                  {threadListLoading ? (
+                    <div className="thread-list-loading" role="status" aria-live="polite">
+                      <div className="empty-state">加载中…</div>
+                      <div className="loading-skeleton">
+                        <span className="loading-skeleton-line"></span>
+                        <span className="loading-skeleton-line short"></span>
+                        <span className="loading-skeleton-line medium"></span>
+                        <span className="loading-skeleton-line long"></span>
+                      </div>
+                    </div>
+                  ) : workspaceGroups.length === 0 ? (
+                    <div className="empty-state">
+                      <span className="empty-state-message empty-state-summary">{searchEmptyLabels.noDataMessage}</span>
+                      <div
+                        className="empty-state-action-block"
+                        role="group"
+                        aria-label="会话数据为空提示"
+                      >
+                        <span className="empty-state-subtitle">
+                          <span aria-hidden="true" className="empty-state-subtitle-icon">
+                            🧭
+                          </span>
+                          <span>快速开始</span>
+                        </span>
                         <button
                           type="button"
-                          className="workspace-toggle"
-                          aria-expanded={isOpen}
-                          onClick={() => toggleWorkspace(group.key)}
+                          className="empty-state-action empty-state-action-primary"
+                          onClick={startNewThread}
                         >
-                          <span className="workspace-chevron">›</span>
-                          <span className="workspace-title">
-                            <strong>{group.name}</strong>
-                            <span>{group.cwd || "未设置工作目录"}</span>
-                          </span>
-                          <span className="workspace-count">{group.threads.length}</span>
+                          <span aria-hidden="true" className="empty-state-action-icon-inline">＋</span>
+                          立即新建会话
                         </button>
-                        {isOpen && (
-                          <div className="thread-list">
-                            {group.threads.map((thread) => (
-                              <button
-                                type="button"
-                                key={thread.id}
-                                className={thread.id === currentThreadId ? "thread selected" : "thread"}
-                                onClick={() => selectThread(thread)}
-                              >
-                                <strong>{threadTitle(thread)}</strong>
-                                <span>{formatThreadTime(thread)}</span>
-                              </button>
-                            ))}
+                        <button
+                          type="button"
+                          className="empty-state-action empty-state-action-secondary"
+                          onClick={() => refreshThreads()}
+                          title="刷新会话列表"
+                          aria-label="刷新会话列表"
+                        >
+                          <span aria-hidden="true" className="empty-state-action-icon-inline">↻</span>
+                          刷新列表
+                        </button>
+                        <p className="empty-state-mini-note">{searchEmptyLabels.noDataHint}</p>
+                      </div>
+                    </div>
+                  ) : visibleWorkspaceGroups.length === 0 ? (
+                    <div className="empty-state">
+                      <span className="empty-state-message empty-state-summary">{workspaceSearchEmptyMessage}</span>
+                      <div
+                        className="empty-state-action-block"
+                        role="group"
+                        aria-label="会话搜索快速操作"
+                      >
+                        <span className="empty-state-subtitle">
+                          <span aria-hidden="true" className="empty-state-subtitle-icon">
+                            ⚡
+                          </span>
+                          <span>快速操作</span>
+                        </span>
+                        <div
+                          className={`empty-state-actions ${
+                            isWorkspaceSearchEmptyActionsCollapsed ? "empty-state-actions-collapsed" : "empty-state-actions-expanded"
+                          }`}
+                        >
                             <button
                               type="button"
-                              className="workspace-new"
-                              onClick={() => startThreadInWorkspace(group.cwd)}
+                              className="empty-state-action empty-state-action-primary"
+                              aria-label={searchEmptyLabels.open}
+                              title={searchEmptyLabels.open}
+                              onClick={resetWorkspaceSearchAll}
                             >
-                              在此项目新建
+                              <span aria-hidden="true" className="empty-state-action-icon-inline">⌂</span>
+                              所有会话
                             </button>
-                          </div>
-                        )}
-                      </section>
-                    );
-                  })
-                )}
+                            <button
+                              type="button"
+                              className="empty-state-action empty-state-action-secondary empty-state-action-priority"
+                              aria-label={searchEmptyLabels.continueSearchSrLabel}
+                              title={searchEmptyLabels.continueSearchAction}
+                              onClick={focusWorkspaceSearchInput}
+                            >
+                              <span aria-hidden="true" className="empty-state-action-icon-inline">⌨</span>
+                              {searchEmptyLabels.continueSearchAction}
+                            </button>
+                            <button
+                              type="button"
+                              className="empty-state-action"
+                              aria-label={searchEmptyLabels.clearSrLabel}
+                              title={searchEmptyLabels.clearTitle}
+                              onClick={clearWorkspaceSearch}
+                            >
+                              <span aria-hidden="true" className="empty-state-action-icon-inline">↩</span>
+                              {searchEmptyLabels.clear}
+                            </button>
+                            <span
+                              id={emptySearchActionId}
+                              role="region"
+                              aria-label={searchEmptyActionsLabel}
+                              aria-live="off"
+                              className={`empty-state-extra-actions ${
+                                isWorkspaceSearchEmptyActionsCollapsed ? "is-collapsed" : "is-expanded"
+                              }`}
+                              aria-hidden={isWorkspaceSearchEmptyActionsCollapsed ? "true" : "false"}
+                            >
+                              <button
+                                type="button"
+                                className="empty-state-action empty-state-action-secondary"
+                                tabIndex={emptySearchActionTabIndex}
+                                aria-label={narrowWorkspaceSearchLabel.srLabel}
+                                onClick={narrowWorkspaceSearch}
+                                title={narrowWorkspaceSearchLabel.title}
+                              >
+                                <span aria-hidden="true" className="empty-state-action-icon-inline">◂</span>
+                                {narrowWorkspaceSearchLabel.action}
+                              </button>
+                              <button
+                                type="button"
+                                className="empty-state-action empty-state-action-secondary"
+                                tabIndex={emptySearchActionTabIndex}
+                                aria-label={searchEmptyLabels.restore.srLabel}
+                                onClick={restoreWorkspaceSearchAndOpenAll}
+                                title={searchEmptyLabels.restore.title}
+                              >
+                                <span aria-hidden="true" className="empty-state-action-icon-inline">↺</span>
+                                {searchEmptyLabels.restore.action}
+                              </button>
+                            </span>
+                          <p className="empty-state-mini-note">{searchEmptyLabels.continueSearchHint}</p>
+                          <button
+                            type="button"
+                            className="empty-state-action empty-state-action-secondary"
+                            onClick={() => refreshThreads()}
+                            title="刷新会话列表"
+                            aria-label="刷新会话列表"
+                          >
+                            <span aria-hidden="true" className="empty-state-action-icon-inline">↻</span>
+                            刷新列表
+                          </button>
+                            <button
+                              type="button"
+                              className="empty-state-action empty-state-action-secondary"
+                              aria-label="恢复最近会话"
+                              onClick={restoreRecentThreadFromEmptyState}
+                              disabled={threadListLoading || !threads[0]}
+                            >
+                              <span aria-hidden="true" className="empty-state-action-icon-inline">⟲</span>
+                              恢复最近会话
+                            </button>
+                          {isMobileWorkspaceTitle && (
+                            <button
+                              type="button"
+                              className={`empty-state-action empty-state-action-more ${
+                                isWorkspaceSearchEmptyActionsCollapsed ? "empty-state-action-more-collapsed" : "empty-state-action-more-expanded"
+                              }`}
+                              aria-expanded={isWorkspaceSearchEmptyActionsCollapsed ? false : true}
+                              aria-controls={emptySearchActionId}
+                              aria-haspopup="true"
+                              aria-label={isWorkspaceSearchEmptyActionsCollapsed ? "展开更多搜索操作" : "收起更多搜索操作"}
+                              title={searchEmptyMoreLabel}
+                              onClick={() => setSearchEmptyActionsExpanded((current) => !current)}
+                            >
+                              <span aria-hidden="true" className="empty-state-action-icon">
+                                ▸
+                              </span>
+                              <span className="sr-only">
+                                {searchEmptyMoreLabel}
+                              </span>
+                            </button>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  ) : (
+                   visibleWorkspaceGroups.map((group) => {
+                     const isOpen =
+                       hasWorkspaceSearch ||
+                       group.threads.some((thread) => thread.id === currentThreadId) ||
+                       workspaceOpenByKey[group.key] !== false;
+                     const threadListId = `threads-${safeDomId(group.key)}`;
+                     return (
+                       <section className="workspace-group" key={group.key}>
+                         <button
+                           type="button"
+                           className="workspace-toggle"
+                           aria-controls={threadListId}
+                           aria-expanded={isOpen}
+                           onClick={() => toggleWorkspace(group.key)}
+                         >
+                            <span className="workspace-chevron">▾</span>
+                           <span className="workspace-title">
+                             <strong>{highlightSearchTerm(group.name, workspaceSearch)}</strong>
+                              <span>{highlightSearchTerm(group.cwd || "Unknown path", workspaceSearch)}</span>
+                           </span>
+                           <span className="workspace-count">{group.threads.length}</span>
+                         </button>
+                         {isOpen && (
+                           <div className="thread-list" id={threadListId}>
+                             {group.threads.map((thread) => (
+                               <button
+                                 type="button"
+                                 key={thread.id}
+                                 className={thread.id === currentThreadId ? "thread selected" : "thread"}
+                                 onClick={() => selectThread(thread)}
+                               >
+                                 <strong>{highlightSearchTerm(threadTitle(thread), workspaceSearch)}</strong>
+                                 <span>{formatThreadTime(thread)}</span>
+                               </button>
+                             ))}
+                             <button
+                               type="button"
+                               className="workspace-new"
+                               onClick={() => startThreadInWorkspace(group.cwd)}
+                             >
+                                New thread in this workspace
+                              </button>
+                           </div>
+                         )}
+                       </section>
+                     );
+                   })
+                 )}
               </div>
-            </aside>
-
-            <section className="workspace-main">
-              <section className="panel chat-panel">
+              </aside>
+              <section className="workspace-main">
                 <div className="chat-head">
                   <div>
                     <h2>{currentTitle}</h2>
@@ -1136,10 +1598,10 @@ function App() {
                   </div>
                   <div className="chat-head-actions">
                     <button type="button" className="secondary-button" onClick={() => setReplies([])}>
-                      清空
+                      Loading thread history
                     </button>
                     <button type="button" className="secondary-button" onClick={interruptTurn}>
-                      打断
+                      No messages yet
                     </button>
                   </div>
                 </div>
@@ -1148,11 +1610,11 @@ function App() {
                   <div className="chat-list" onScroll={updateChatPinnedState} ref={chatListRef}>
                     {threadLoading ? (
                       <article className="chat-empty">
-                        <pre>正在加载历史记录...</pre>
+                        <pre>Loading thread history...</pre>
                       </article>
                     ) : replies.length === 0 ? (
                     <article className="chat-empty">
-                      <pre>等待回复...</pre>
+                      <pre>Waiting for Codex response...</pre>
                     </article>
                     ) : (
                       replies.map((item) => (
@@ -1170,18 +1632,18 @@ function App() {
                   </div>
                   {showChatBottomButton && (
                     <button className="chat-bottom-button" onClick={() => scrollChatToBottom()} type="button">
-                      新消息，到底部
+                      Scroll to latest
                     </button>
                   )}
                 </div>
 
                 {!currentThreadId && (
                   <label>
-                    工作目录
+                    Working directory
                     <input
                       value={cwd}
                       onChange={(event) => setCwd(event.target.value)}
-                      placeholder="例如 D:\\PROJECT\\CODE\\your-repo"
+                      placeholder="For example: D:\\PROJECT\\CODE\\your-repo"
                     />
                   </label>
                 )}
@@ -1191,19 +1653,19 @@ function App() {
                     value={prompt}
                     onChange={(event) => updatePrompt(event.target.value)}
                     onKeyDown={handlePromptKeyDown}
-                    placeholder="发给 Codex 的消息"
+                    placeholder="Ask Codex to edit, explain, or inspect this project."
                     rows={4}
                   />
                   <button type="submit" disabled={busy || !prompt.trim()}>
-                    {busy ? "发送中" : "发送"}
+                    {busy ? "Sending..." : "Send"}
                   </button>
                 </form>
                 <div className="approval-row">
                   <button type="button" onClick={() => approveLatest("accept")}>
-                    同意最新审批
+                    Approve
                   </button>
                   <button type="button" onClick={() => approveLatest("decline")}>
-                    拒绝
+                    Decline
                   </button>
                 </div>
                 <div className={`work-status ${workStatus.phase}`}>
@@ -1217,13 +1679,13 @@ function App() {
 
               <section className="panel activity-panel">
                 <div className="panel-head">
-                  <h2>活动</h2>
+                  <h2>Activity</h2>
                 </div>
                 <div className="activity-list">
                   {activities.length === 0 ? (
                     <article className="activity-item empty">
-                      <strong>暂无活动</strong>
-                      <p>发送消息后，这里会显示思考、计划、工具调用和审批状态。</p>
+                      <strong>No activity yet</strong>
+                      <p>Codex activity, command output, file changes, and approval requests will appear here.</p>
                     </article>
                   ) : (
                     activities.map((item) => (
@@ -1240,13 +1702,12 @@ function App() {
                 </div>
               </section>
             </section>
-          </section>
 
           <section className="panel events">
             <div className="panel-head">
-              <h2>事件</h2>
+              <h2>Logs</h2>
               <button type="button" onClick={() => setLogs([])}>
-                清空
+                Loading thread history
               </button>
             </div>
             <div className="event-list">
@@ -1258,7 +1719,7 @@ function App() {
                   </header>
                   <p>{eventSummary(item.body)}</p>
                   <details>
-                    <summary>查看 JSON</summary>
+                    <summary>View JSON</summary>
                     <pre>{JSON.stringify(item.body, null, 2)}</pre>
                   </details>
                 </article>
@@ -1290,31 +1751,31 @@ function isServerRequestMethod(method: string) {
 function describeServerRequest(method: string, params: any) {
   if (method === "item/commandExecution/requestApproval" || method === "execCommandApproval") {
     return {
-      title: "等待命令审批",
-      detail: [params.command, params.cwd ? `目录：${params.cwd}` : "", params.reason].filter(Boolean).join("\n")
+      title: "Command approval required",
+      detail: [params.command, params.cwd ? `Directory: ${params.cwd}` : "", params.reason].filter(Boolean).join("\n")
     };
   }
   if (method === "item/fileChange/requestApproval" || method === "applyPatchApproval") {
     return {
-      title: "等待文件修改审批",
-      detail: [params.reason, params.grantRoot ? `授权目录：${params.grantRoot}` : ""].filter(Boolean).join("\n")
+      title: "File change approval required",
+      detail: [params.reason, params.grantRoot ? `Grant root: ${params.grantRoot}` : ""].filter(Boolean).join("\n")
     };
   }
   if (method === "item/tool/call") {
     return {
-      title: "工具调用中",
+      title: "Tool call requested",
       detail: `${formatToolName(params.namespace, params.tool)}\n${formatJson(params.arguments)}`
     };
   }
   if (method === "mcpServer/elicitation/request") {
     return {
-      title: "等待 MCP 输入",
+      title: "MCP elicitation requested",
       detail: [params.serverName, params.message, params.url].filter(Boolean).join("\n")
     };
   }
   if (method === "item/tool/requestUserInput") {
     return {
-      title: "等待用户输入",
+      title: "User input requested",
       detail: Array.isArray(params.questions)
         ? params.questions.map((question: any) => question.question || question.header || question.id).join("\n")
         : undefined
@@ -1322,14 +1783,14 @@ function describeServerRequest(method: string, params: any) {
   }
   if (method === "item/permissions/requestApproval") {
     return {
-      title: "等待权限审批",
-      detail: [params.reason, params.cwd ? `目录：${params.cwd}` : "", formatJson(params.permissions)]
+      title: "Permission approval required",
+      detail: [params.reason, params.cwd ? `Directory: ${params.cwd}` : "", formatJson(params.permissions)]
         .filter(Boolean)
         .join("\n")
     };
   }
   return {
-    title: "等待 Codex 请求",
+    title: "Codex request pending",
     detail: method
   };
 }
@@ -1344,9 +1805,9 @@ function describeThreadItem(item: any, completed: boolean): ActivityDescriptor |
     return {
       id: `reply:${itemId}`,
       phase: "replying",
-      kind: "回复",
-      title: completed ? "回复已完成" : "正在生成回复",
-      detail: completed ? "最终回答已返回。" : "回答内容正在流式返回。",
+      kind: "Reply",
+      title: completed ? "Reply completed" : "Generating reply",
+      detail: completed ? "Assistant reply completed." : "Answer content is streaming back.",
       state: completed ? "done" : "running"
     };
   }
@@ -1354,8 +1815,8 @@ function describeThreadItem(item: any, completed: boolean): ActivityDescriptor |
     return {
       id: itemId,
       phase: "thinking",
-      kind: "计划",
-      title: completed ? "计划已记录" : "正在制定计划",
+      kind: "Plan",
+      title: completed ? "Plan recorded" : "Making a plan",
       detail: typeof item.text === "string" ? item.text : undefined,
       state: completed ? "done" : "running"
     };
@@ -1364,9 +1825,9 @@ function describeThreadItem(item: any, completed: boolean): ActivityDescriptor |
     return {
       id: itemId,
       phase: "thinking",
-      kind: "思考",
-      title: completed ? "思考阶段完成" : "正在思考",
-      detail: "Codex 正在分析上下文。",
+      kind: "Reasoning",
+      title: completed ? "Reasoning completed" : "Thinking",
+      detail: "Codex is analyzing context.",
       state: completed ? "done" : "running"
     };
   }
@@ -1375,7 +1836,7 @@ function describeThreadItem(item: any, completed: boolean): ActivityDescriptor |
     return {
       id: itemId,
       phase: "tool",
-      kind: "工具",
+      kind: "Tool",
       title: commandTitle(item.status, completed),
       detail: formatCommandItem(item),
       state
@@ -1386,8 +1847,8 @@ function describeThreadItem(item: any, completed: boolean): ActivityDescriptor |
     return {
       id: itemId,
       phase: "tool",
-      kind: "文件",
-      title: state === "done" ? "文件修改完成" : state === "error" ? "文件修改失败" : "文件修改中",
+      kind: "File",
+      title: state === "done" ? "File change completed" : state === "error" ? "File change failed" : "File change running",
       detail: formatFileChanges(item.changes),
       state
     };
@@ -1398,11 +1859,11 @@ function describeThreadItem(item: any, completed: boolean): ActivityDescriptor |
       id: itemId,
       phase: "tool",
       kind: "MCP",
-      title: toolTitle("MCP 工具", item.status, completed),
+      title: toolTitle("MCP tool", item.status, completed),
       detail: [
         `${item.server ?? "MCP"} / ${item.tool ?? "tool"}`,
         item.arguments ? formatJson(item.arguments) : "",
-        item.error?.message ? `错误：${item.error.message}` : ""
+        item.error?.message ? `Error: ${item.error.message}` : ""
       ]
         .filter(Boolean)
         .join("\n"),
@@ -1414,12 +1875,12 @@ function describeThreadItem(item: any, completed: boolean): ActivityDescriptor |
     return {
       id: itemId,
       phase: "tool",
-      kind: "工具",
-      title: toolTitle("工具调用", item.status, completed),
+      kind: "Tool",
+      title: toolTitle("Tool call", item.status, completed),
       detail: [
         formatToolName(item.namespace, item.tool),
         item.arguments ? formatJson(item.arguments) : "",
-        item.success === false ? "结果：失败" : ""
+        item.success === false ? "Result: failed" : ""
       ]
         .filter(Boolean)
         .join("\n"),
@@ -1431,8 +1892,8 @@ function describeThreadItem(item: any, completed: boolean): ActivityDescriptor |
     return {
       id: itemId,
       phase: "tool",
-      kind: "子任务",
-      title: toolTitle("子任务工具", item.status, completed),
+      kind: "Subtask",
+      title: toolTitle("Subtask tool", item.status, completed),
       detail: [String(item.tool ?? ""), item.prompt ? shortenText(item.prompt, 800) : ""].filter(Boolean).join("\n"),
       state
     };
@@ -1441,8 +1902,8 @@ function describeThreadItem(item: any, completed: boolean): ActivityDescriptor |
     return {
       id: itemId,
       phase: "tool",
-      kind: "搜索",
-      title: completed ? "搜索已完成" : "正在搜索",
+      kind: "Search",
+      title: completed ? "Search completed" : "Searching",
       detail: item.query,
       state: completed ? "done" : "running"
     };
@@ -1452,8 +1913,8 @@ function describeThreadItem(item: any, completed: boolean): ActivityDescriptor |
     return {
       id: itemId,
       phase: "tool",
-      kind: "图片",
-      title: state === "done" ? "图片已生成" : "图片生成中",
+      kind: "Image",
+      title: state === "done" ? "Image generated" : "Generating image",
       detail: [item.revisedPrompt, item.savedPath].filter(Boolean).join("\n"),
       state
     };
@@ -1462,8 +1923,8 @@ function describeThreadItem(item: any, completed: boolean): ActivityDescriptor |
     return {
       id: itemId,
       phase: "tool",
-      kind: "图片",
-      title: "查看图片",
+      kind: "Image",
+      title: "View image",
       detail: item.path,
       state: completed ? "done" : "running"
     };
@@ -1471,8 +1932,8 @@ function describeThreadItem(item: any, completed: boolean): ActivityDescriptor |
   return {
     id: itemId,
     phase: "tool",
-    kind: "项目",
-    title: completed ? `${item.type} 已完成` : `${item.type} 进行中`,
+    kind: "Item",
+    title: completed ? `${item.type} completed` : `${item.type} running`,
     state: completed ? "done" : "running"
   };
 }
@@ -1494,6 +1955,65 @@ function currentPlanStep(plan: unknown) {
   }
   const current = plan.find((step: any) => step?.status === "inProgress");
   return current?.step ? String(current.step) : undefined;
+}
+
+function filterWorkspaceGroups(groups: WorkspaceGroup[], query: string) {
+  const cleanQuery = query.trim().toLowerCase();
+  if (!cleanQuery) {
+    return groups;
+  }
+  return groups
+    .map((group) => {
+      const groupMatches = [group.name, group.cwd].some((value) => value.toLowerCase().includes(cleanQuery));
+      if (groupMatches) {
+        return group;
+      }
+      const threads = group.threads.filter((thread) => threadMatchesQuery(thread, cleanQuery));
+      return threads.length ? { ...group, threads } : undefined;
+    })
+    .filter((group): group is WorkspaceGroup => Boolean(group));
+}
+
+function threadMatchesQuery(thread: ThreadSummary, query: string) {
+  return [thread.name, thread.preview, thread.cwd, thread.id]
+    .filter((value): value is string => typeof value === "string" && value.length > 0)
+    .some((value) => value.toLowerCase().includes(query));
+}
+
+function highlightSearchTerm(value: string, query: string): React.ReactNode {
+  const text = value || "";
+  const cleanQuery = query.trim();
+  if (!cleanQuery) {
+    return text;
+  }
+  const escaped = cleanQuery.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const matcher = new RegExp(escaped, "ig");
+  const nodes: React.ReactNode[] = [];
+  let lastIndex = 0;
+  let match: RegExpExecArray | null;
+
+  while ((match = matcher.exec(text)) !== null) {
+    const start = match.index;
+    if (start > lastIndex) {
+      nodes.push(text.slice(lastIndex, start));
+    }
+    nodes.push(
+      <mark className="search-highlight" key={`mark-${start}`}>
+        {match[0]}
+      </mark>
+    );
+    lastIndex = matcher.lastIndex;
+  }
+
+  if (lastIndex < text.length) {
+    nodes.push(text.slice(lastIndex));
+  }
+
+  if (!nodes.length) {
+    return text;
+  }
+
+  return <>{nodes}</>;
 }
 
 function groupThreadsByCwd(list: ThreadSummary[]): WorkspaceGroup[] {
@@ -1530,7 +2050,7 @@ function normalizeCwd(cwd: unknown) {
 
 function workspaceName(cwd: string) {
   if (!cwd) {
-    return "未设置工作目录";
+    return "No working directory set";
   }
   const clean = cwd.replace(/[\\/]+$/, "");
   const parts = clean.split(/[\\/]/);
@@ -1541,14 +2061,18 @@ function workspaceKey(cwd: string) {
   return cwd || "__none__";
 }
 
+function safeDomId(value: string) {
+  return value.replace(/[^a-zA-Z0-9_-]+/g, "-").replace(/^-+|-+$/g, "") || "unknown";
+}
+
 function threadTitle(thread: ThreadSummary | undefined) {
-  return thread?.name || thread?.preview || thread?.id || "未命名对话";
+  return thread?.name || thread?.preview || thread?.id || "Untitled thread";
 }
 
 function formatThreadTime(thread: ThreadSummary) {
   const value = thread.updatedAt ?? thread.createdAt;
   const ms = timestampToMs(value);
-  return ms ? new Date(ms).toLocaleString() : "无时间信息";
+  return ms ? new Date(ms).toLocaleString() : "No time information";
 }
 
 function timestampToMs(value: unknown) {
@@ -1578,12 +2102,12 @@ function isNearChatBottom(el: HTMLElement) {
 
 function labelForRole(role: ChatHistoryMessage["role"]) {
   if (role === "user") {
-    return "你";
+    return "You";
   }
   if (role === "assistant") {
     return "Codex";
   }
-  return "系统";
+  return "System";
 }
 
 function ActivityDetail({ item }: { item: ActivityItem }) {
@@ -1595,18 +2119,18 @@ function ActivityDetail({ item }: { item: ActivityItem }) {
           return (
             <div className="activity-command" key={index}>
               <div className="activity-kv">
-                <span>命令</span>
+                <span>Command</span>
                 <code>{block.command}</code>
               </div>
               {block.cwd && (
                 <div className="activity-kv">
-                  <span>目录</span>
+                  <span>Directory</span>
                   <code>{block.cwd}</code>
                 </div>
               )}
               {block.exitCode && (
                 <div className="activity-kv">
-                  <span>退出码</span>
+                  <span>Exit code</span>
                   <code>{block.exitCode}</code>
                 </div>
               )}
@@ -1645,7 +2169,7 @@ function ActivityDetail({ item }: { item: ActivityItem }) {
             <div className="activity-tool" key={index}>
               {block.name && (
                 <div className="activity-kv">
-                  <span>工具</span>
+                  <span>Tool</span>
                   <code>{block.name}</code>
                 </div>
               )}
@@ -1669,10 +2193,10 @@ function activityDetailBlocks(item: ActivityItem): ActivityDetailBlock[] {
   if (!detail) {
     return [];
   }
-  if (item.kind === "工具" && (detail.startsWith("$ ") || detail.includes("\n目录：") || detail.includes("\n退出码："))) {
+  if (item.kind === "Tool" && (detail.startsWith("$ ") || detail.includes("\nDirectory:") || detail.includes("\nExit code:"))) {
     return [parseCommandDetail(detail)];
   }
-  if (item.kind === "文件") {
+  if (item.kind === "File") {
     const files = detail
       .split("\n")
       .map(parseFileChangeLine)
@@ -1681,13 +2205,13 @@ function activityDetailBlocks(item: ActivityItem): ActivityDetailBlock[] {
       return [{ kind: "files", files }];
     }
   }
-  if (item.kind === "计划") {
+  if (item.kind === "Plan") {
     const plan = parsePlanDetail(detail);
     if (plan.steps.length) {
       return [plan];
     }
   }
-  if (item.kind === "MCP" || item.kind === "子任务" || (item.kind === "工具" && !detail.startsWith("$ "))) {
+  if (item.kind === "MCP" || item.kind === "Subtask" || (item.kind === "Tool" && !detail.startsWith("$ "))) {
     return [parseToolDetail(detail)];
   }
   return detail.split("\n\n").map((text) => ({ kind: "text", text }));
@@ -1700,10 +2224,10 @@ function parseCommandDetail(detail: string): ActivityDetailBlock {
   let exitCode = "";
   const output: string[] = [];
   for (const line of lines) {
-    if (line.startsWith("目录：")) {
-      cwd = line.slice("目录：".length);
-    } else if (line.startsWith("退出码：")) {
-      exitCode = line.slice("退出码：".length);
+    if (line.startsWith("Directory:")) {
+      cwd = line.slice("Directory:".length);
+    } else if (line.startsWith("Exit code:")) {
+      exitCode = line.slice("Exit code:".length);
     } else {
       output.push(line);
     }
@@ -1737,12 +2261,12 @@ function parseToolDetail(detail: string): ActivityDetailBlock {
   const lines = detail.split("\n");
   const name = lines.shift()?.trim();
   const rest = lines.join("\n").trim();
-  const errorLine = lines.find((line) => line.startsWith("错误："));
+  const errorLine = lines.find((line) => line.startsWith("Error:"));
   return {
     kind: "tool",
     name,
     payload: errorLine ? rest.replace(errorLine, "").trim() : rest,
-    error: errorLine ? errorLine.slice("错误：".length) : undefined
+    error: errorLine ? errorLine.slice("Error:".length) : undefined
   };
 }
 
@@ -1758,14 +2282,14 @@ function eventSummary(body: unknown) {
   const message = value?.message ?? value;
   const method = typeof message?.method === "string" ? message.method : "";
   if (!method) {
-    return typeof body === "string" ? body : "原始事件";
+    return typeof body === "string" ? body : "Raw event";
   }
   const params = message.params ?? {};
-  if (method === "item/commandExecution/outputDelta") return "命令输出更新";
-  if (method === "item/fileChange/patchUpdated") return "文件补丁已更新";
-  if (method === "item/agentMessage/delta") return "助手回复流式返回";
-  if (method === "turn/plan/updated") return currentPlanStep(params.plan) ?? "计划状态更新";
-  if (method === "item/completed" && params.item?.type) return `${params.item.type} 完成`;
+  if (method === "item/commandExecution/outputDelta") return "Command output updated";
+  if (method === "item/fileChange/patchUpdated") return "File patch updated";
+  if (method === "item/agentMessage/delta") return "Assistant reply streaming";
+  if (method === "turn/plan/updated") return currentPlanStep(params.plan) ?? "Plan updated";
+  if (method === "item/completed" && params.item?.type) return `${params.item.type} completed`;
   return method;
 }
 
@@ -1842,14 +2366,20 @@ function renderChatText(text: string) {
     if (part.kind === "rule") {
       return <hr key={index} />;
     }
-    if (part.type === "heading") {
-      const Tag = `h${Math.min(Math.max(part.level ?? 3, 1), 4)}` as "h1" | "h2" | "h3" | "h4";
-      return <Tag key={index}>{renderInlineMarkdown(part.text)}</Tag>;
+    if (part.kind === "block" && part.type === "heading") {
+      const level = Math.min(Math.max(part.level ?? 3, 1), 4);
+      if (level === 1) return <h1 key={index}>{renderInlineMarkdown(part.text)}</h1>;
+      if (level === 2) return <h2 key={index}>{renderInlineMarkdown(part.text)}</h2>;
+      if (level === 4) return <h4 key={index}>{renderInlineMarkdown(part.text)}</h4>;
+      return <h3 key={index}>{renderInlineMarkdown(part.text)}</h3>;
     }
-    if (part.type === "quote") {
+    if (part.kind === "block" && part.type === "quote") {
       return <blockquote key={index}>{renderInlineMarkdown(part.text)}</blockquote>;
     }
-    return <p key={index}>{renderInlineMarkdown(part.text)}</p>;
+    if (part.kind === "block") {
+      return <p key={index}>{renderInlineMarkdown(part.text)}</p>;
+    }
+    return null;
   });
 }
 
@@ -2096,7 +2626,7 @@ function CodeCopyButton({ code }: { code: string }) {
 
   return (
     <button className="chat-code-copy" onClick={copyCode} type="button">
-      {copied ? "已复制" : "复制"}
+      {copied ? "Copied" : "Copy"}
     </button>
   );
 }
@@ -2134,8 +2664,8 @@ function saveWorkspaceOpenState(value: Record<string, boolean>) {
 function formatCommandItem(item: any) {
   const parts = [
     item.command ? `$ ${item.command}` : "",
-    item.cwd ? `目录：${item.cwd}` : "",
-    item.exitCode !== null && item.exitCode !== undefined ? `退出码：${item.exitCode}` : "",
+    item.cwd ? `Directory: ${item.cwd}` : "",
+    item.exitCode !== null && item.exitCode !== undefined ? `Exit code: ${item.exitCode}` : "",
     item.aggregatedOutput ? shortenText(String(item.aggregatedOutput), 1800) : ""
   ];
   return parts.filter(Boolean).join("\n");
@@ -2175,29 +2705,29 @@ function stateFromStatus(status: unknown, completed: boolean): ActivityState {
 function commandTitle(status: unknown, completed: boolean) {
   const state = stateFromStatus(status, completed);
   if (state === "done") {
-    return "命令已完成";
+    return "Command completed";
   }
   if (state === "error") {
-    return "命令失败";
+    return "Command failed";
   }
   if (state === "waiting") {
-    return "命令等待中";
+    return "Command waiting";
   }
-  return "命令运行中";
+  return "Command running";
 }
 
 function toolTitle(name: string, status: unknown, completed: boolean) {
   const state = stateFromStatus(status, completed);
   if (state === "done") {
-    return `${name}已完成`;
+    return `${name} completed`;
   }
   if (state === "error") {
-    return `${name}失败`;
+    return `${name} failed`;
   }
   if (state === "waiting") {
-    return `${name}等待中`;
+    return `${name} waiting`;
   }
-  return `${name}运行中`;
+  return `${name} running`;
 }
 
 function statusLabel(status: unknown) {
@@ -2232,7 +2762,7 @@ function shortenText(text: string, max: number) {
   if (!text || text.length <= max) {
     return text;
   }
-  return `${text.slice(0, max)}\n...已截断 ${text.length - max} 字符`;
+  return `${text.slice(0, max)}\n...truncated ${text.length - max} characters`;
 }
 
 createRoot(document.getElementById("root")!).render(<App />);
